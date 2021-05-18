@@ -66,6 +66,7 @@ class WitlessProtocol(asyncio.SubprocessProtocol):
 
     proc_out = None
     proc_err = None
+    proc_in = None
 
     def __init__(self, encoding=None):
         """
@@ -186,6 +187,7 @@ class KillOutput(WitlessProtocol):
     """
     proc_out = True
     proc_err = True
+    proc_in = True
 
     def pipe_data_received(self, fd, data):
         if lgr.isEnabledFor(5):

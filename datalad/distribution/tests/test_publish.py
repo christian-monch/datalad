@@ -99,8 +99,8 @@ def test_invalid_call(origin, tdir):
 
 
 @known_failure_windows
-@with_tempfile
-@with_tempfile
+@with_tree({})
+@with_tree({})
 def test_since_empty_and_unsupported(p1, p2):
     source = Dataset(p1).create()
     from datalad.support.network import PathRI

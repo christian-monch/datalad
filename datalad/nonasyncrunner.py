@@ -22,19 +22,21 @@ from typing import Any
 
 logger = logging.getLogger("datalad.runner")
 
+STDIN_FILENO = 0
 STDOUT_FILENO = 1
 STDERR_FILENO = 2
 
 
 class ReaderThread(threading.Thread):
-    def __init__(self, file, q):
+    def __init__(self, file, q, command=""):
         super().__init__(daemon=True)
         self.file = file
         self.queue = q
+        self.command = command
         self.quit = False
 
     def __str__(self):
-        return f"ReaderThread({self.file}, {self.queue})"
+        return f"ReaderThread({self.file}, {self.queue}, {self.command})"
 
     def request_exit(self):
         """
@@ -48,21 +50,47 @@ class ReaderThread(threading.Thread):
         self.file.close()
 
     def run(self):
-        logger.debug(f"ReaderThread({self.file}, {self.queue}) started")
-        while not self.quit:
-            try:
-                data = os.read(self.file.fileno(), 1024)
-            except BrokenPipeError as exc:
-                logger.debug(f"{self} exiting (broken pipe)")
-                self.queue.put((self.file.fileno(), exc, time.time()))
-                return
+        logger.debug(f"{self} started")
 
+        while not self.quit:
+
+            data = os.read(self.file.fileno(), 1024)
             if data == b"":
-                logger.debug(f"{self} exiting (stream end)")
+                logger.debug(f"{self} EOF")
                 self.queue.put((self.file.fileno(), None, time.time()))
-                return
+                break
 
             self.queue.put((self.file.fileno(), data, time.time()))
+
+        logger.debug(f"{self} exiting")
+
+
+class WriterThread(threading.Thread):
+    def __init__(self, file, q, command=""):
+        super().__init__(daemon=True)
+        self.file = file
+        self.queue = q
+        self.command = command
+        self.quit = False
+
+    def __str__(self):
+        return f"WriterThread({self.file}, {self.queue}, {self.command})"
+
+    def run(self):
+        logger.debug(f"{self} started")
+        while not self.quit:
+
+            data = self.queue.get()
+            if data is None:
+                logger.debug(f"{self} EOF")
+                break
+            try:
+                os.write(self.file.fileno(), data)
+            except BrokenPipeError:
+                logger.debug(f"{self} broken pipe")
+                break
+
+        logger.debug(f"{self} exiting")
 
 
 def run_command(cmd,
@@ -73,12 +101,13 @@ def run_command(cmd,
 
     catch_stdout = protocol_class.proc_out is not None
     catch_stderr = protocol_class.proc_err is not None
+    write_stdin = protocol_class.proc_in is not None
 
     kwargs = {
         **kwargs,
         **dict(
             bufsize=0,
-            stdin=stdin,
+            stdin=subprocess.PIPE if write_stdin else stdin,
             stdout=subprocess.PIPE if catch_stdout else None,
             stderr=subprocess.PIPE if catch_stderr else None,
             shell=True if isinstance(cmd, str) else False
@@ -96,11 +125,7 @@ def run_command(cmd,
     protocol.connection_made(process)
 
     # Map the pipe file numbers to stdout and stderr file number, because
-    # the latter are hardcoded in the protocol code
-    # TODO: the fixed file numbers seem to be a side-effect of using
-    #  SubprocessProtocol. Some datalad-code relies on this. Shall
-    #  we replace hard coded stdout, stderr-file numbers with parameters?
-
+    # the latter are hardcoded in the code that subclasses asyncioprotocol code
     fileno_mapping = {
         process_stdout_fileno: STDOUT_FILENO,
         process_stderr_fileno: STDERR_FILENO
@@ -109,25 +134,43 @@ def run_command(cmd,
     if catch_stdout or catch_stderr:
 
         output_queue = queue.Queue()
+        input_queue = queue.Queue()
+
         active_file_numbers = set()
         if catch_stderr:
-            stderr_reader_thread = ReaderThread(process.stderr, output_queue)
+            stderr_reader_thread = ReaderThread(process.stderr, output_queue, cmd)
             stderr_reader_thread.start()
             active_file_numbers.add(process.stderr.fileno())
         if catch_stdout:
-            stdout_reader_thread = ReaderThread(process.stdout, output_queue)
+            stdout_reader_thread = ReaderThread(process.stdout, output_queue, cmd)
             stdout_reader_thread.start()
             active_file_numbers.add(process.stdout.fileno())
+        if write_stdin:
+            stdin_writer_thread = WriterThread(process.stdin, input_queue, cmd)
+            stdin_writer_thread.start()
+            active_file_numbers.add(process.stdin.fileno())
 
         while True:
+            if write_stdin and stdin_writer_thread.is_alive():
+                write_data = protocol.provide_pipe_data(STDIN_FILENO)
+                if write_data is not None:
+                    input_queue.put(write_data)
+
             file_number, data, time_stamp = output_queue.get()
             if isinstance(data, bytes):
                 protocol.pipe_data_received(fileno_mapping[file_number], data)
             else:
                 protocol.pipe_connection_lost(fileno_mapping[file_number], data)
                 active_file_numbers.remove(file_number)
-                if not active_file_numbers:
-                    break
+
+                if write_stdin:
+                    if active_file_numbers == {process.stdin.fileno()}:
+                        # Let writer thread terminate
+                        input_queue.put(None)
+                        break
+                else:
+                    if not active_file_numbers:
+                        break
 
     process.wait()
     result = protocol._prepare_result()
