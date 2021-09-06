@@ -202,6 +202,8 @@ def query_aggregated_metadata(reporton, ds, aps, recursive=False,
       Of result dictionaries.
     """
     from datalad.coreapi import get
+    from datalad.api import meta_dump
+
     # look for and load the aggregation info for the base dataset
     agginfos, agg_base_path = load_ds_aggregate_db(ds)
 
@@ -223,6 +225,22 @@ def query_aggregated_metadata(reporton, ds, aps, recursive=False,
         if rpath in reported:
             # we already had this, probably via recursion of some kind
             continue
+
+        for result in meta_dump(dataset=ds.path,
+                                path=str(rpath),
+                                recursive=recursive,
+                                result_renderer="disabled"
+                                ):
+            if result["status"] == "ok":
+                datalad_result = get_status_dict(
+                    status='ok',
+                    metadata=result["metadata"]["extracted_metadata"],
+                    # normpath to avoid trailing dot
+                    path=op.normpath(op.join(ds.path, rpath)),
+                    type='dataset')
+                yield datalad_result
+
+        return
         rap = dict(ap, rpath=rpath, type=ap.get('type', None))
 
         # we really have to look this up from the aggregated metadata
