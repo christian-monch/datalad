@@ -3241,6 +3241,7 @@ class AnnexRepo(GitRepo, RepoInterface):
                 eval_availability=False,
                 init=self.status(
                     paths=paths,
+                    untracked=untracked,
                     eval_submodule_state='full')
             )
         )
