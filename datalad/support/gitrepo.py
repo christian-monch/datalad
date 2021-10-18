@@ -10,14 +10,14 @@
 
 """
 
-import re
+import logging
 import os
 import os.path as op
-
-import logging
-from collections import (
-    OrderedDict,
-)
+import posixpath
+import re
+import warnings
+from collections import OrderedDict
+from functools import wraps
 from os import linesep
 from os.path import (
     join as opj,
@@ -28,15 +28,18 @@ from os.path import (
     dirname,
     curdir,
     pardir,
-    sep
+    sep,
+)
+from typing import (
+    Generator,
+    List,
 )
 
-import posixpath
-from functools import wraps
-import warnings
-
 from datalad.log import log_progress
-from datalad.support.due import due, Doi
+from datalad.support.due import (
+    due,
+    Doi,
+)
 
 from datalad import ssh_manager
 from datalad.cmd import (
@@ -79,7 +82,7 @@ from .exceptions import (
 from .network import (
     RI,
     PathRI,
-    is_ssh
+    is_ssh,
 )
 from .path import get_parent_paths
 from datalad.core.local.repo import repo_from_path
@@ -3118,6 +3121,9 @@ class GitRepo(CoreGitRepo):
           `state`
             Can be 'added', 'untracked', 'clean', 'deleted', 'modified'.
         """
+        assert isinstance(paths, (Generator, List, type(None))), \
+            "type error in parameter 'paths', expected: generator, list or None" \
+            f", got: {type(paths)} ({paths})"
         lgr.debug('Query status of %r for %s paths',
                   self, len(paths) if paths else 'all')
         return self.diffstatus(
