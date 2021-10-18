@@ -12,14 +12,15 @@ For further information on git-annex see https://git-annex.branchable.com/.
 
 """
 
-from collections import OrderedDict
 import json
 import logging
 import os
 import re
 import warnings
 
+from collections import OrderedDict
 from itertools import chain
+from multiprocessing import cpu_count
 from os import linesep
 from os.path import (
     curdir,
@@ -29,7 +30,10 @@ from os.path import (
     isdir,
     normpath
 )
-from multiprocessing import cpu_count
+from typing import (
+    Generator,
+    List,
+)
 from weakref import (
     finalize,
     WeakValueDictionary
@@ -3171,6 +3175,10 @@ class AnnexRepo(GitRepo, RepoInterface):
             pathlib.Path of the content object in the local annex, if one
             is available (with `eval_availability`)
         """
+        assert isinstance(paths, (Generator, List, type(None))), \
+            "type error in parameter 'paths', expected: generator, list or None" \
+            f", got: {type(paths)} ({paths})"
+
         if init is None:
             info = OrderedDict()
         elif init == 'git':
@@ -3232,6 +3240,10 @@ class AnnexRepo(GitRepo, RepoInterface):
         return info
 
     def annexstatus(self, paths=None, untracked='all'):
+        assert isinstance(paths, (Generator, List, type(None))), \
+            "type error in parameter 'paths', expected: generator, list or None" \
+            f", got: {type(paths)} ({paths})"
+
         info = self.get_content_annexinfo(
             paths=paths,
             eval_availability=False,

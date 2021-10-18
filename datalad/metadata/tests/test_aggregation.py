@@ -222,7 +222,7 @@ def test_aggregate_with_unavailable_objects_from_subds(path, target):
     super.aggregate_metadata(recursive=True, update_mode='all',
                              force_extraction=False)
     objs_after = clone.repo.get_content_annexinfo(
-        paths=objs, init=None, eval_availability=True)
+        paths=list(map(str, objs.keys())), init=None, eval_availability=True)
     assert_true(all(st["has_content"] for st in objs_after.values()))
 
 
