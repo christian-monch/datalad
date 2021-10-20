@@ -1,0 +1,42 @@
+
+# Main thread
+runner = Runner()
+
+for result in runner.run(something):
+    if isinstance(result, StdoutResult):
+        yield result
+    elif isinstance(result, StderrResult):
+        yield result
+    elif isinstance(result, StdinQueueEmpty):
+        new_input = protocol.provide_input()
+        runner.input_queue.put(new_input)
+
+
+
+
+class DemoProvider(Provider):
+    def __init__(self):
+        self.counter = count()
+
+    def provide_input(self):
+        return self.count.__next__()
+
+
+
+
+run_object = runner.run("git-annex --batch", protocol_x)
+
+run_object.send(next_file())
+for x in (hole daten vom prozess, schicke daten durchs protocol, falls protocol ergebnis liefert: yield ergebnis) run_object.write(next_file_path()):
+    if no_more_files():
+        break
+    run_object.send(next_file())
+
+
+while file = next_file():
+    for x in run_object.write(file):
+        do_something_with(x)
+
+
+for (file_descriptor_name, data) in runner.run():
+    pass
