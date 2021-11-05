@@ -65,6 +65,10 @@ from datalad.cmd import (
     WitlessProtocol,
 )
 from datalad.runner.protocol import GeneratorMixIn
+from datalad.runner.utils import (
+    LineEndMarker,
+    LineSplitter,
+)
 
 # imports from same module:
 from datalad.dataset.repo import RepoInterface
@@ -812,8 +816,14 @@ class AnnexRepo(GitRepo, RepoInterface):
                 raise e
         return srs
 
-    def _call_annex(self, args, files=None, jobs=None, protocol=StdOutErrCapture,
-                    git_options=None, stdin=None, merge_annex_branches=True,
+    def _call_annex(self,
+                    args,
+                    files=None,
+                    jobs=None,
+                    protocol=StdOutErrCapture,
+                    git_options=None,
+                    stdin=None,
+                    merge_annex_branches=True,
                     **kwargs):
         """Internal helper to run git-annex commands
 
@@ -853,10 +863,11 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         Returns
         -------
-        dict
-          Return value of WitlessRunner.run(). The content of the dict is
-          determined by the given `protocol`. By default, it provides git-annex's
-          stdout and stderr (under these key names)
+        Union[dict, Generator]
+          Return value of WitlessRunner.run(). The content of the dict and
+          the elements that the generator returns are determined by the given
+          `protocol`. By default, the dict provides git-annex's
+          stdout and stderr (under these key names),
 
         Raises
         ------
@@ -915,12 +926,20 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         try:
             if files:
-                return runner.run_on_filelist_chunks(
-                    cmd,
-                    files,
-                    protocol=protocol,
-                    env=env,
-                    **kwargs)
+                if isinstance(protocol, GeneratorMixIn):
+                    return runner.generator_run_on_filelist_chunks(
+                        cmd,
+                        files,
+                        protocol=protocol,
+                        env=env,
+                        **kwargs)
+                else:
+                    return runner.run_on_filelist_chunks(
+                        cmd,
+                        files,
+                        protocol=protocol,
+                        env=env,
+                        **kwargs)
             else:
                 return runner.run(
                     cmd,
@@ -966,7 +985,10 @@ class AnnexRepo(GitRepo, RepoInterface):
             # we don't know how to handle this, just pass it on
             raise
 
-    def _call_annex_records(self, args, files=None, jobs=None,
+    def _call_annex_records(self,
+                            args,
+                            files=None,
+                            jobs=None,
                             git_options=None,
                             stdin=None,
                             merge_annex_branches=True,
@@ -1011,7 +1033,7 @@ class AnnexRepo(GitRepo, RepoInterface):
           Output from the git-annex process was captured, but no structured
           records could be parsed.
         """
-        protocol = AnnexJsonProtocol
+        protocol = GeneratorAnnexJsonProtocol
 
         args = args[:] + ['--json', '--json-error-messages']
         if progress:
@@ -1019,16 +1041,26 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         out = None
         try:
-            out = self._call_annex(
-                args,
-                files=files,
-                jobs=jobs,
-                protocol=protocol,
-                git_options=git_options,
-                stdin=stdin,
-                merge_annex_branches=merge_annex_branches,
-                **kwargs,
-            )
+            for fd, annex_record in self._call_annex(args,
+                                                     files=files,
+                                                     jobs=jobs,
+                                                     protocol=protocol,
+                                                     git_options=git_options,
+                                                     stdin=stdin,
+                                                     merge_annex_branches=merge_annex_branches,
+                                                     **kwargs):
+                if out is None:
+                    out = {
+                        "stdout_json": [],
+                        "stderr": [],
+                        "stdout": []
+                    }
+                print(fd, repr(annex_record))
+                if fd == 1:
+                    out["stdout_json"].append(annex_record)
+                else:
+                    out["stderr"].append(annex_record)
+
         except CommandError as e:
             # Note: Workaround for not existing files as long as annex doesn't
             # report it within JSON response:
@@ -1146,7 +1178,7 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         See `_call_annex()` for more information on Exceptions.
         """
-        return self._call_annex_records(args, files=files)
+        return list(self._call_annex_records(args, files=files))
 
     def call_annex(self, args, files=None):
         """Call annex and return standard output.
@@ -3648,9 +3680,36 @@ class GeneratorAnnexJsonProtocol(GeneratorMixIn, AnnexJsonProtocol):
                  total_nbytes=None):
         GeneratorMixIn.__init__(self)
         AnnexJsonProtocol.__init__(self, done_future, total_nbytes)
+        self.stderr_line_splitter = LineSplitter()
 
     def add_to_output(self, json_object):
-        self.send_result(json_object)
+        self.send_result((1, json_object))
+
+    def pipe_data_received(self, fd, data):
+
+        if fd != 1:
+            assert fd == 2, f"Unknown file descriptor: ({fd})"
+            self.send_result((fd, data))
+            return
+
+        AnnexJsonProtocol.pipe_data_received(self, fd, data)
+
+    def process_exited(self):
+        stderr_line = self.stderr_line_splitter.finish_processing()
+        if stderr_line is not None:
+            line, marker = stderr_line
+            self.send_result(
+                (
+                    2,
+                    line + (
+                        ""
+                        if marker == LineEndMarker.unterminated
+                        else os.linesep
+                    )
+                )
+            )
+
+        AnnexJsonProtocol.process_exited(self)
 
 
 class AnnexInitOutput(WitlessProtocol):
