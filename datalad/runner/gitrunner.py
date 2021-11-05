@@ -214,7 +214,7 @@ class GitWitlessRunner(WitlessRunner, GitRunnerBase):
         """
 
         assert isinstance(cmd, list)
-        assert isinstance(protocol, GeneratorMixIn)
+        assert issubclass(protocol, GeneratorMixIn)
 
         file_chunks = generate_file_chunks(files, cmd)
 

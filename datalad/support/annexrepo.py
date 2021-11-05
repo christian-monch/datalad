@@ -12,13 +12,13 @@ For further information on git-annex see https://git-annex.branchable.com/.
 
 """
 
-from collections import OrderedDict
 import json
 import logging
 import os
 import re
+import sys
 import warnings
-
+from collections import OrderedDict
 from itertools import chain
 from os import linesep
 from os.path import (
@@ -63,6 +63,10 @@ from datalad.cmd import (
     StdOutCapture,
     StdOutErrCapture,
     WitlessProtocol,
+)
+from datalad.runner.nonasyncrunner import (
+    STDOUT_FILENO,
+    STDERR_FILENO,
 )
 from datalad.runner.protocol import GeneratorMixIn
 from datalad.runner.utils import (
@@ -926,7 +930,8 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         try:
             if files:
-                if isinstance(protocol, GeneratorMixIn):
+                if issubclass(protocol, GeneratorMixIn):
+                    #sys.stderr.write("XXXX   " + repr(cmd) + "\n")
                     return runner.generator_run_on_filelist_chunks(
                         cmd,
                         files,
@@ -934,6 +939,7 @@ class AnnexRepo(GitRepo, RepoInterface):
                         env=env,
                         **kwargs)
                 else:
+                    #sys.stderr.write("YYYY   " + repr(cmd) + "\n")
                     return runner.run_on_filelist_chunks(
                         cmd,
                         files,
@@ -941,6 +947,7 @@ class AnnexRepo(GitRepo, RepoInterface):
                         env=env,
                         **kwargs)
             else:
+                #sys.stderr.write("ZZZZ   " + repr(cmd) + repr(protocol) + "\n")
                 return runner.run(
                     cmd,
                     stdin=stdin,
@@ -1039,29 +1046,40 @@ class AnnexRepo(GitRepo, RepoInterface):
         if progress:
             args += ['--json-progress']
 
-        out = None
+        # Read all output
+        out = {
+            "stderr": bytearray(),
+            "stdout": bytearray(),
+            "stdout_json": [],
+        }
+        output_received = False
         try:
-            for fd, annex_record in self._call_annex(args,
-                                                     files=files,
-                                                     jobs=jobs,
-                                                     protocol=protocol,
-                                                     git_options=git_options,
-                                                     stdin=stdin,
-                                                     merge_annex_branches=merge_annex_branches,
-                                                     **kwargs):
-                if out is None:
-                    out = {
-                        "stdout_json": [],
-                        "stderr": [],
-                        "stdout": []
-                    }
-                print(fd, repr(annex_record))
-                if fd == 1:
-                    out["stdout_json"].append(annex_record)
+            for category, json_or_string in self._call_annex(
+                    args,
+                    files=files,
+                    jobs=jobs,
+                    protocol=protocol,
+                    git_options=git_options,
+                    stdin=stdin,
+                    merge_annex_branches=merge_annex_branches,
+                    **kwargs):
+
+                output_received = True
+                if category == "stdout_json":
+                    assert isinstance(json_or_string, dict)
+                    out["stdout_json"].append(json_or_string)
+                elif category == "stdout":
+                    out["stdout"] += json_or_string
+                elif category == "stderr":
+                    out["stderr"] += json_or_string
                 else:
-                    out["stderr"].append(annex_record)
+                    raise RuntimeError(f"Unknown category: {category}")
 
         except CommandError as e:
+
+            # Put the recorded stderr into e (to satisfy the old code).
+            e.stderr = out["stderr"].decode()
+
             # Note: Workaround for not existing files as long as annex doesn't
             # report it within JSON response:
             # see http://git-annex.branchable.com/bugs/copy_does_not_reflect_some_failed_copies_in_--json_output/
@@ -1073,11 +1091,6 @@ class AnnexRepo(GitRepo, RepoInterface):
                 line.endswith(' not found')
             ]
             if not_existing:
-                if out is None:
-                    # we create the error reporting herein. If all files were
-                    # not found, there is nothing on stdout and we don't need
-                    # anything
-                    out = {'stdout_json': []}
                 out['stdout_json'].extend(
                     {
                         "command": args[0],
@@ -1098,7 +1111,11 @@ class AnnexRepo(GitRepo, RepoInterface):
             # while there was a 'fatal:...' in stderr, which should be a
             # failure/exception
             # Or if we had empty stdout but there was stderr
-            if out is None or (not out and e.stderr):
+            if output_received is False \
+                    or (
+                    out["stdout"] == b""
+                    and out["stdout_json"] == []
+                    and out["stderr"] != b""):
                 raise e
 
             records = e.kwargs.get('stdout_json', [])
@@ -1106,16 +1123,6 @@ class AnnexRepo(GitRepo, RepoInterface):
                 have = out.get('stdout_json', [])
                 have.extend(records)
                 out['stdout_json'] = have
-
-            #if e.stderr:
-            #    # else just warn about present errors
-            #    shorten = lambda x: x[:1000] + '...' if len(x) > 1000 else x
-
-            #    _log = lgr.debug if kwargs.get('expect_fail', False) else lgr.warning
-            #    _log(
-            #        "Running %s resulted in stderr output: %s",
-            #        args, shorten(e.stderr)
-            #    )
 
         json_objects = out.pop('stdout_json')
 
@@ -3481,6 +3488,9 @@ class AnnexJsonProtocol(WitlessProtocol):
     def add_to_output(self, json_object):
         self.json_out.append(json_object)
 
+    def add_to_stdout(self, line):
+        pass
+
     def connection_made(self, transport):
         super().connection_made(transport)
         self._pbars = set()
@@ -3530,6 +3540,7 @@ class AnnexJsonProtocol(WitlessProtocol):
                     # TODO turn this into an error result, or put the exception
                     # onto the result future -- needs more thought
                     lgr.error('Received undecodable JSON output: %s', line)
+                self.add_to_stdout(line)
                 continue
             self._proc_json_record(j)
 
@@ -3680,36 +3691,21 @@ class GeneratorAnnexJsonProtocol(GeneratorMixIn, AnnexJsonProtocol):
                  total_nbytes=None):
         GeneratorMixIn.__init__(self)
         AnnexJsonProtocol.__init__(self, done_future, total_nbytes)
-        self.stderr_line_splitter = LineSplitter()
 
     def add_to_output(self, json_object):
-        self.send_result((1, json_object))
+        self.send_result(("stdout_json", json_object))
+
+    def add_to_stdout(self, line):
+        self.send_result(("stdout", line))
 
     def pipe_data_received(self, fd, data):
 
-        if fd != 1:
-            assert fd == 2, f"Unknown file descriptor: ({fd})"
-            self.send_result((fd, data))
+        if fd != STDOUT_FILENO:
+            assert fd == STDERR_FILENO, f"Unknown file descriptor: ({fd})"
+            self.send_result(("stderr", data))
             return
 
         AnnexJsonProtocol.pipe_data_received(self, fd, data)
-
-    def process_exited(self):
-        stderr_line = self.stderr_line_splitter.finish_processing()
-        if stderr_line is not None:
-            line, marker = stderr_line
-            self.send_result(
-                (
-                    2,
-                    line + (
-                        ""
-                        if marker == LineEndMarker.unterminated
-                        else os.linesep
-                    )
-                )
-            )
-
-        AnnexJsonProtocol.process_exited(self)
 
 
 class AnnexInitOutput(WitlessProtocol):
