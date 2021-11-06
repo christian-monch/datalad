@@ -175,7 +175,7 @@ class WitlessProtocol(asyncio.SubprocessProtocol):
         """
         return_code = self.process.poll()
         if return_code is None:
-            raise CommandError(
+            raise RuntimeError(
                 "Got None as a return_code for the process %i",
                 self.process.pid)
         lgr.log(
