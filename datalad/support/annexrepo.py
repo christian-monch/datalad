@@ -1048,8 +1048,8 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         # Read all output
         out = {
-            "stderr": bytearray(),
-            "stdout": bytearray(),
+            "stderr": "",
+            "stdout": "",
             "stdout_json": [],
         }
         output_received = False
@@ -1078,7 +1078,7 @@ class AnnexRepo(GitRepo, RepoInterface):
         except CommandError as e:
 
             # Put the recorded stderr into e (to satisfy the old code).
-            e.stderr = out["stderr"].decode()
+            e.stderr = out["stderr"]
 
             # Note: Workaround for not existing files as long as annex doesn't
             # report it within JSON response:
@@ -1098,8 +1098,7 @@ class AnnexRepo(GitRepo, RepoInterface):
                         "note": "not found",
                         "success": False,
                     }
-                    for f in not_existing
-                )
+                    for f in not_existing)
 
             # Note: insert additional code here to analyse failure and possibly
             # raise a custom exception
@@ -1113,9 +1112,9 @@ class AnnexRepo(GitRepo, RepoInterface):
             # Or if we had empty stdout but there was stderr
             if output_received is False \
                     or (
-                    out["stdout"] == b""
+                    out["stdout"] == ""
                     and out["stdout_json"] == []
-                    and out["stderr"] != b""):
+                    and out["stderr"] != ""):
                 raise e
 
             records = e.kwargs.get('stdout_json', [])
@@ -3695,14 +3694,14 @@ class GeneratorAnnexJsonProtocol(GeneratorMixIn, AnnexJsonProtocol):
     def add_to_output(self, json_object):
         self.send_result(("stdout_json", json_object))
 
-    def add_to_stdout(self, line):
-        self.send_result(("stdout", line))
+    def add_to_stdout(self, data):
+        self.send_result(("stdout", data.decode(self.encoding)))
 
     def pipe_data_received(self, fd, data):
 
         if fd != STDOUT_FILENO:
             assert fd == STDERR_FILENO, f"Unknown file descriptor: ({fd})"
-            self.send_result(("stderr", data))
+            self.send_result(("stderr", data.decode(self.encoding)))
             return
 
         AnnexJsonProtocol.pipe_data_received(self, fd, data)
