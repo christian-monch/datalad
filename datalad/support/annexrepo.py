@@ -16,10 +16,10 @@ import json
 import logging
 import os
 import re
-import sys
 import warnings
 from collections import OrderedDict
 from itertools import chain
+from multiprocessing import cpu_count
 from os import linesep
 from os.path import (
     curdir,
@@ -29,7 +29,10 @@ from os.path import (
     isdir,
     normpath
 )
-from multiprocessing import cpu_count
+from typing import (
+    List,
+    Optional,
+)
 from weakref import (
     finalize,
     WeakValueDictionary
@@ -820,6 +823,62 @@ class AnnexRepo(GitRepo, RepoInterface):
                 raise e
         return srs
 
+    def _check_for_custom_exception(self,
+                                    args: List[str],
+                                    e: CommandError
+                                    ) -> Optional[CommandError]:
+        """
+        Interpret a CommandError exception in order to detect more
+        specific execptions.
+
+        Parameters
+        ----------
+        args: List[str]
+            Arguments that lead to the exception e
+        e: CommandError
+            The exception that should be interpreted
+
+        Returns
+        ----------
+        Optional[CommandError]
+            None, if no specific error was detected
+            CommandError, a more specific error that should be raised
+            instead of e
+        """
+
+        # OutOfSpaceError:
+        # Note:
+        # doesn't depend on anything in stdout. Therefore check this before
+        # dealing with stdout
+        out_of_space_re = re.search(
+            "not enough free space, need (.*) more", e.stderr
+        )
+        if out_of_space_re:
+            return OutOfSpaceError(cmd=['annex'] + args,
+                                   sizemore_msg=out_of_space_re.groups()[0])
+
+        # RemoteNotAvailableError:
+        remote_na_re = re.search(
+            "there is no available git remote named \"(.*)\"", e.stderr
+        )
+        if remote_na_re:
+            return RemoteNotAvailableError(cmd=['annex'] + args,
+                                           remote=remote_na_re.groups()[0])
+
+        # TEMP: Workaround for git-annex bug, where it reports success=True
+        # for annex add, while simultaneously complaining, that it is in
+        # a submodule:
+        # TODO: For now just reraise. But independently on this bug, it
+        # makes sense to have an exception for that case
+        in_subm_re = re.search(
+            "fatal: Pathspec '(.*)' is in submodule '(.*)'", e.stderr
+        )
+        if in_subm_re:
+            return e
+
+        # No more specific exception was detected
+        return None
+
     def _call_annex(self,
                     args,
                     files=None,
@@ -931,7 +990,6 @@ class AnnexRepo(GitRepo, RepoInterface):
         try:
             if files:
                 if issubclass(protocol, GeneratorMixIn):
-                    #sys.stderr.write("XXXX   " + repr(cmd) + "\n")
                     return runner.generator_run_on_filelist_chunks(
                         cmd,
                         files,
@@ -939,7 +997,6 @@ class AnnexRepo(GitRepo, RepoInterface):
                         env=env,
                         **kwargs)
                 else:
-                    #sys.stderr.write("YYYY   " + repr(cmd) + "\n")
                     return runner.run_on_filelist_chunks(
                         cmd,
                         files,
@@ -947,7 +1004,6 @@ class AnnexRepo(GitRepo, RepoInterface):
                         env=env,
                         **kwargs)
             else:
-                #sys.stderr.write("ZZZZ   " + repr(cmd) + repr(protocol) + "\n")
                 return runner.run(
                     cmd,
                     stdin=stdin,
@@ -959,35 +1015,9 @@ class AnnexRepo(GitRepo, RepoInterface):
             # cannot be handled here. Detection of something, we can deal with,
             # doesn't mean there's nothing else to deal with.
 
-            # OutOfSpaceError:
-            # Note:
-            # doesn't depend on anything in stdout. Therefore check this before
-            # dealing with stdout
-            out_of_space_re = re.search(
-                "not enough free space, need (.*) more", e.stderr
-            )
-            if out_of_space_re:
-                raise OutOfSpaceError(cmd=['annex'] + args,
-                                      sizemore_msg=out_of_space_re.groups()[0])
-
-            # RemoteNotAvailableError:
-            remote_na_re = re.search(
-                "there is no available git remote named \"(.*)\"", e.stderr
-            )
-            if remote_na_re:
-                raise RemoteNotAvailableError(cmd=['annex'] + args,
-                                              remote=remote_na_re.groups()[0])
-
-            # TEMP: Workaround for git-annex bug, where it reports success=True
-            # for annex add, while simultaneously complaining, that it is in
-            # a submodule:
-            # TODO: For now just reraise. But independently on this bug, it
-            # makes sense to have an exception for that case
-            in_subm_re = re.search(
-                "fatal: Pathspec '(.*)' is in submodule '(.*)'", e.stderr
-            )
-            if in_subm_re:
-                raise e
+            custom_exception = self._check_for_custom_exception(args, e)
+            if custom_exception:
+                raise custom_exception
 
             # we don't know how to handle this, just pass it on
             raise
@@ -1108,6 +1138,10 @@ class AnnexRepo(GitRepo, RepoInterface):
 
             # Note: insert additional code here to analyse failure and possibly
             # raise a custom exception
+
+            custom_exception = self._check_for_custom_exception(args, e)
+            if custom_exception:
+                raise custom_exception
 
             # if we didn't raise before, just depend on whether or not we seem
             # to have some json to return. It should contain information on
