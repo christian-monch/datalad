@@ -1077,8 +1077,13 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         except CommandError as e:
 
-            # Put the recorded stderr into e (to satisfy the old code).
+            # Put the recorded stderr into e (to be compatible the old code).
             e.stderr = out["stderr"]
+            e.kwargs = {
+                "stdout_json": [],
+                "stdout": out["stdout"],
+                "stderr": out["stderr"],
+            }
 
             # Note: Workaround for not existing files as long as annex doesn't
             # report it within JSON response:
@@ -1098,7 +1103,8 @@ class AnnexRepo(GitRepo, RepoInterface):
                         "note": "not found",
                         "success": False,
                     }
-                    for f in not_existing)
+                    for f in not_existing
+                )
 
             # Note: insert additional code here to analyse failure and possibly
             # raise a custom exception
@@ -1110,9 +1116,8 @@ class AnnexRepo(GitRepo, RepoInterface):
             # while there was a 'fatal:...' in stderr, which should be a
             # failure/exception
             # Or if we had empty stdout but there was stderr
-            if output_received is False \
-                    or (
-                    out["stdout"] == ""
+            if output_received is False or (
+                    output_received is True
                     and out["stdout_json"] == []
                     and out["stderr"] != ""):
                 raise e
