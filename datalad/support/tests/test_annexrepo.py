@@ -937,6 +937,55 @@ def test_AnnexRepo_get(src, dst):
     ok_file_has_content(testfile_abs, "content to be annex-addurl'd", strip=True)
 
 
+@with_tempfile
+@with_tempfile
+def test_AnnexRepo_gen_get(src, dst):
+    ar = AnnexRepo(src)
+    (ar.pathobj / 'test-annex.dat').write_text(
+        "content to be annex-addurl'd")
+    ar.save('some')
+
+    annex = AnnexRepo.clone(src, dst)
+    assert_is_instance(annex, AnnexRepo, "AnnexRepo was not created.")
+    testfile = 'test-annex.dat'
+    testfile_abs = opj(dst, testfile)
+    assert_false(annex.file_has_content("test-annex.dat"))
+    with swallow_outputs():
+        result = list(annex.gen_get(testfile))
+    print(result)
+    ok_(annex.file_has_content("test-annex.dat"))
+    ok_file_has_content(testfile_abs, "content to be annex-addurl'd", strip=True)
+
+    called = []
+    # for some reason yoh failed mock to properly just call original func
+    orig_run = annex._git_runner.generator_run_on_filelist_chunks
+
+    def check_run(cmd, files, **kwargs):
+        cmd_name = cmd[cmd.index('annex') + 1]
+        called.append(cmd_name)
+        if cmd_name == 'find':
+            assert_not_in('-J5', cmd)
+        elif cmd_name == 'get':
+            assert_in('-J5', cmd)
+        else:
+            raise AssertionError(
+                "no other commands so far should be ran. Got %s" % cmd
+            )
+        return orig_run(cmd, files, **kwargs)
+
+    annex.drop(testfile)
+    with \
+            patch.object(GitWitlessRunner,
+                      'generator_run_on_filelist_chunks',
+                      side_effect=check_run,
+                      auto_spec=True), \
+            swallow_outputs():
+        result = list(annex.gen_get(testfile, jobs=5))
+    print(result)
+    eq_(called, ['find', 'get'])
+    ok_file_has_content(testfile_abs, "content to be annex-addurl'd", strip=True)
+
+
 @with_tree(tree={'file.dat': 'content'})
 @with_tempfile
 def test_v7_detached_get(opath, path):

@@ -18,7 +18,6 @@ import logging
 import os
 import re
 import warnings
-
 from itertools import chain
 from os import linesep
 from os.path import (
@@ -63,6 +62,10 @@ from datalad.cmd import (
     StdOutCapture,
     StdOutErrCapture,
     WitlessProtocol,
+)
+from datalad.runner.nonasyncrunner import (
+    STDOUT_FILENO,
+    STDERR_FILENO,
 )
 from datalad.runner.protocol import GeneratorMixIn
 
@@ -812,8 +815,14 @@ class AnnexRepo(GitRepo, RepoInterface):
                 raise e
         return srs
 
-    def _call_annex(self, args, files=None, jobs=None, protocol=StdOutErrCapture,
-                    git_options=None, stdin=None, merge_annex_branches=True,
+    def _call_annex(self,
+                    args,
+                    files=None,
+                    jobs=None,
+                    protocol=StdOutErrCapture,
+                    git_options=None,
+                    stdin=None,
+                    merge_annex_branches=True,
                     **kwargs):
         """Internal helper to run git-annex commands
 
@@ -853,10 +862,11 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         Returns
         -------
-        dict
-          Return value of WitlessRunner.run(). The content of the dict is
-          determined by the given `protocol`. By default, it provides git-annex's
-          stdout and stderr (under these key names)
+        Union[dict, Generator]
+          Return value of WitlessRunner.run(). The content of the dict and
+          the elements that the generator returns are determined by the given
+          `protocol`. By default, the dict provides git-annex's
+          stdout and stderr (under these key names),
 
         Raises
         ------
@@ -915,12 +925,20 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         try:
             if files:
-                return runner.run_on_filelist_chunks(
-                    cmd,
-                    files,
-                    protocol=protocol,
-                    env=env,
-                    **kwargs)
+                if issubclass(protocol, GeneratorMixIn):
+                    return runner.generator_run_on_filelist_chunks(
+                        cmd,
+                        files,
+                        protocol=protocol,
+                        env=env,
+                        **kwargs)
+                else:
+                    return runner.run_on_filelist_chunks(
+                        cmd,
+                        files,
+                        protocol=protocol,
+                        env=env,
+                        **kwargs)
             else:
                 return runner.run(
                     cmd,
@@ -965,6 +983,142 @@ class AnnexRepo(GitRepo, RepoInterface):
 
             # we don't know how to handle this, just pass it on
             raise
+
+    def _gen_call_annex_records(self,
+                                args,
+                                files=None,
+                                jobs=None,
+                                git_options=None,
+                                stdin=None,
+                                merge_annex_branches=True,
+                                progress=False,
+                                **kwargs):
+        """Internal helper to run git-annex commands with JSON result processing
+
+        `_call_annex()` is used for git-annex command execution, using
+        AnnexJsonProtocol.
+
+        Parameters
+        ----------
+        args: list
+          See `_call_annex()` for details.
+        files: list, optional
+          See `_call_annex()` for details.
+        jobs : int or 'auto', optional
+          See `_call_annex()` for details.
+        git_options: list, optional
+          See `_call_annex()` for details.
+        stdin: File-like, optional
+          See `_call_annex()` for details.
+        merge_annex_branches: bool, optional
+          See `_call_annex()` for details.
+        **kwargs:
+          Additional arguments are passed on to the AnnexJsonProtocol constructor
+
+        Returns
+        -------
+        Generator[dict]
+          Generator yielding parsed result records.
+
+        Raises
+        ------
+        CommandError
+          See `_call_annex()` for details.
+        OutOfSpaceError
+          See `_call_annex()` for details.
+        RemoteNotAvailableError
+          See `_call_annex()` for details.
+        RuntimeError
+          Output from the git-annex process was captured, but no structured
+          records could be parsed.
+        """
+        protocol = GeneratorAnnexJsonProtocol
+
+        args = args[:] + ['--json', '--json-error-messages']
+        if progress:
+            args += ['--json-progress']
+
+        # Read all output
+        out = {
+            "stderr": "",
+            "stdout": "",
+        }
+        output_received = False
+        output_json_received = False
+        try:
+            for category, json_or_string in self._call_annex(
+                    args,
+                    files=files,
+                    jobs=jobs,
+                    protocol=protocol,
+                    git_options=git_options,
+                    stdin=stdin,
+                    merge_annex_branches=merge_annex_branches,
+                    **kwargs):
+
+                output_received = True
+                if category == "stdout_json":
+                    assert isinstance(json_or_string, dict)
+                    output_json_received = True
+                    if len(json_or_string.keys()) == 1 and json_or_string['info']:
+                        lgr.info(json_or_string['info'])
+                    else:
+                        yield json_or_string
+                elif category == "stdout":
+                    out["stdout"] += json_or_string
+                    if output_json_received:
+                        # We at least received some valid json output, so warn about
+                        # non-json output and continue.
+                        lgr.warning(
+                            "Received non-json lines for --json command: %s",
+                            out)
+                elif category == "stderr":
+                    out["stderr"] += json_or_string
+                else:
+                    raise RuntimeError(f"Unknown category: {category}")
+
+        except CommandError as e:
+            # Note: Workaround for not existing files as long as annex doesn't
+            # report it within JSON response:
+            # see http://git-annex.branchable.com/bugs/copy_does_not_reflect_some_failed_copies_in_--json_output/
+            not_existing = [
+                # cut the file path from the middle, no useful delimiter
+                # need to deal with spaces too!
+                line[11:-10] for line in out["stderr"].splitlines()
+                if line.startswith('git-annex:') and
+                line.endswith(' not found')
+            ]
+            if not_existing:
+                yield from [
+                    {
+                        "command": args[0],
+                        "file": f,
+                        "note": "not found",
+                        "success": False,
+                    }
+                    for f in not_existing
+                ]
+
+            # Note: insert additional code here to analyse failure and possibly
+            # raise a custom exception
+
+            # if we didn't raise before, just depend on whether or not we seem
+            # to have some json to return. It should contain information on
+            # failure in keys 'success' and 'note'
+            # TODO: This is not entirely true. 'annex status' may return empty,
+            # while there was a 'fatal:...' in stderr, which should be a
+            # failure/exception
+            # Or if we had empty stdout but there was stderr
+            if output_received is False or (
+                    output_received is True
+                    and output_json_received is False
+                    and out["stderr"] != ""):
+                raise e
+
+        if out.get('stdout') and output_json_received is False:
+            raise RuntimeError(
+                "Received no json output for --json command, only:\n{}"
+                .format(out["stdout"]))
 
     def _call_annex_records(self, args, files=None, jobs=None,
                             git_options=None,
@@ -1463,6 +1617,139 @@ class AnnexRepo(GitRepo, RepoInterface):
         unknown_sizes = []  # unused atm
         # for now just record total size, and
         for j in self._call_annex_records(
+                ['find'] + expr, files=files,
+                merge_annex_branches=merge_annex_branches
+        ):
+            # TODO: some files might not even be here.  So in current fancy
+            # output reporting scheme we should then theoretically handle
+            # those cases here and say 'impossible' or something like that
+            if not j.get('success', True):
+                # TODO: I guess do something with yielding and filtering for
+                # what need to be done and what not
+                continue
+            key = j['key']
+            size = j.get('bytesize')
+            if key in keys_seen:
+                # multiple files could point to the same key.  no need to
+                # request multiple times
+                continue
+            keys_seen.add(key)
+            assert j['file']
+            fetch_files.append(j['file'])
+            if size and size.isdigit():
+                expected_files[key] = int(size)
+            else:
+                expected_files[key] = None
+                unknown_sizes.append(j['file'])
+        return expected_files, fetch_files
+
+    # That does not work with generators: @normalize_paths
+    def gen_get(self, files, remote=None, options=None, jobs=None, key=False):
+        """Get the actual content of files
+
+        Parameters
+        ----------
+        files : list of str
+            paths to get
+        remote : str, optional
+            from which remote to fetch content
+        options : list of str, optional
+            commandline options for the git annex get command
+        jobs : int or None, optional
+            how many jobs to run in parallel (passed to git-annex call).
+            If not specified (None), then
+        key : bool, optional
+            If provided file value is actually a key
+
+        Returns
+        -------
+        Generator[Dict] : yields dicts
+        """
+        options = options[:] if options else []
+
+        if self.config.get("annex.retry") is None:
+            options.extend(
+                ["-c",
+                 "annex.retry={}".format(
+                     self.config.obtain("datalad.annex.retry"))])
+
+        if remote:
+            if remote not in self.get_remotes():
+                raise RemoteNotAvailableError(
+                    remote=remote,
+                    cmd="annex get",
+                    msg="Remote is not known. Known are: %s"
+                    % (self.get_remotes(),)
+                )
+            self._maybe_open_ssh_connection(remote)
+            options += ['--from', remote]
+
+        # analyze provided files to decide which actually are needed to be
+        # fetched
+
+        if not key:
+            expected_downloads, fetch_files = self._gen_get_expected_files(
+                files, ['--not', '--in', '.'],
+                merge_annex_branches=False  # interested only in local info
+            )
+        else:
+            fetch_files = files
+            assert len(files) == 1, "When key=True only a single file be provided"
+            expected_downloads = {files[0]: AnnexRepo.get_size_from_key(files[0])}
+
+        if not fetch_files:
+            lgr.debug("No files found needing fetching.")
+            return []
+
+        if len(fetch_files) != len(files):
+            lgr.debug("Actually getting %d files", len(fetch_files))
+
+        # TODO: provide more meaningful message (possibly aggregating 'note'
+        #  from annex failed ones
+        # TODO: reproduce DK's bug on OSX, and either switch to
+        #  --batch mode (I don't think we have --progress support in long
+        #  alive batch processes ATM),
+        if key:
+            cmd = ['get'] + options + ['--key'] + files
+            files_arg = None
+        else:
+            cmd = ['get'] + options
+            files_arg = files
+
+        yield from self._gen_call_annex_records(
+            cmd,
+            # TODO: eventually make use of --batch mode
+            files=files_arg,
+            jobs=jobs,
+            progress=True,
+            # filter(bool,   to avoid trying to add up None's when size is not known
+            total_nbytes=sum(filter(bool, expected_downloads.values())),
+        )
+
+    def _gen_get_expected_files(self, files, expr, merge_annex_branches=True):
+        """Given a list of files, figure out what to be downloaded
+
+        Parameters
+        ----------
+        files
+        expr: list
+          Expression to be passed into annex's find
+
+        Returns
+        -------
+        expected_files : dict
+          key -> size
+        fetch_files : list
+          files to be fetched
+        """
+        lgr.debug("Determine what files match the query to work with")
+        # Let's figure out first which files/keys and of what size to download
+        expected_files = {}
+        fetch_files = []
+        keys_seen = set()
+        unknown_sizes = []  # unused atm
+        # for now just record total size, and
+        for j in self._gen_call_annex_records(
                 ['find'] + expr, files=files,
                 merge_annex_branches=merge_annex_branches
         ):
@@ -3449,6 +3736,9 @@ class AnnexJsonProtocol(WitlessProtocol):
     def add_to_output(self, json_object):
         self.json_out.append(json_object)
 
+    def add_to_stdout(self, line):
+        pass
+
     def connection_made(self, transport):
         super().connection_made(transport)
         self._pbars = set()
@@ -3498,6 +3788,7 @@ class AnnexJsonProtocol(WitlessProtocol):
                     # TODO turn this into an error result, or put the exception
                     # onto the result future -- needs more thought
                     lgr.error('Received undecodable JSON output: %s', line)
+                self.add_to_stdout(line)
                 continue
             self._proc_json_record(j)
 
@@ -3650,7 +3941,19 @@ class GeneratorAnnexJsonProtocol(GeneratorMixIn, AnnexJsonProtocol):
         AnnexJsonProtocol.__init__(self, done_future, total_nbytes)
 
     def add_to_output(self, json_object):
-        self.send_result(json_object)
+        self.send_result(("stdout_json", json_object))
+
+    def add_to_stdout(self, data):
+        self.send_result(("stdout", data.decode(self.encoding)))
+
+    def pipe_data_received(self, fd, data):
+
+        if fd != STDOUT_FILENO:
+            assert fd == STDERR_FILENO, f"Unknown file descriptor: ({fd})"
+            self.send_result(("stderr", data.decode(self.encoding)))
+            return
+
+        AnnexJsonProtocol.pipe_data_received(self, fd, data)
 
 
 class AnnexInitOutput(WitlessProtocol):
