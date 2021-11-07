@@ -272,7 +272,13 @@ def test_AnnexRepo_get_outofspace(annex_path):
             stderr="junk around not enough free space, need 905.6 MB more and after"
         )
 
-    with patch.object(GitWitlessRunner, 'run_on_filelist_chunks', raise_cmderror) as cma, \
+    with \
+            patch.object(GitWitlessRunner,
+                         'run_on_filelist_chunks',
+                         raise_cmderror), \
+            patch.object(GitWitlessRunner,
+                         'generator_run_on_filelist_chunks',
+                         raise_cmderror), \
             assert_raises(OutOfSpaceError) as cme:
         ar.get("file")
     exc = cme.exception
@@ -929,8 +935,15 @@ def test_AnnexRepo_get(src, dst):
         return orig_run(cmd, files, **kwargs)
 
     annex.drop(testfile)
-    with patch.object(GitWitlessRunner, 'run_on_filelist_chunks',
-                      side_effect=check_run, auto_spec=True), \
+    with \
+            patch.object(GitWitlessRunner,
+                         'run_on_filelist_chunks',
+                         side_effect=check_run,
+                         auto_spec=True),\
+            patch.object(GitWitlessRunner,
+                         'generator_run_on_filelist_chunks',
+                         side_effect=check_run,
+                         auto_spec=True),\
             swallow_outputs():
         annex.get(testfile, jobs=5)
     eq_(called, ['find', 'get'])
