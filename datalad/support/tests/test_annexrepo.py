@@ -1398,21 +1398,30 @@ def test_annex_copy_to(src, origin, clone):
     # by _get_expected_files, so in real life -- wouldn't get report about Incomplete!?
     def fail_to_copy(command, **kwargs):
         if command[0] == 'copy':
-            # That is not how annex behaves
-            # http://git-annex.branchable.com/bugs/copy_does_not_reflect_some_failed_copies_in_--json_output/
-            # for non-existing files output goes into stderr
-            raise CommandError(
-                "Failed to run ...",
-                stdout_json=[
-                    {"command":"copy","note":"to target ...", "success":True,
-                     "key":"akey1", "file":"copied"},
-                    {"command":"copy","note":"checking target ...",
-                     "success":True, "key":"akey2", "file":"existed"},
-                ],
-                stderr=
-                    'git-annex: nonex1 not found\n'
-                    'git-annex: nonex2 not found\n'
-            )
+            return [
+                {
+                    "command": "copy",
+                    "note": "to target ...",
+                    "success": True,
+                    "key": "akey1",
+                    "file": "copied"
+                },
+                {
+                    "command": "copy",
+                    "note": "checking target ...",
+                    "success": True,
+                    "key": "akey2",
+                    "file": "existed"
+                },
+                {
+                    "file": "nonex1",
+                    "success": False
+                },
+                {
+                    "file": "nonex2",
+                    "success": False
+                },
+            ]
         else:
             return orig_run(command, **kwargs)
 
@@ -1420,10 +1429,13 @@ def test_annex_copy_to(src, origin, clone):
         assert files == ["copied", "existed", "nonex1", "nonex2"]
         return {'akey1': 10}, ["copied"]
 
-    with patch.object(repo, '_call_annex', fail_to_copy), \
+    with \
+            patch.object(repo, '_call_annex_records', fail_to_copy), \
             patch.object(repo, '_get_expected_files', fail_to_copy_get_expected):
+
         with assert_raises(IncompleteResultsError) as cme:
             repo.copy_to(["copied", "existed", "nonex1", "nonex2"], "target")
+
     eq_(cme.exception.results, ["copied"])
     eq_(cme.exception.failed, ['nonex1', 'nonex2'])
 
