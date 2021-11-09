@@ -272,9 +272,12 @@ def test_AnnexRepo_get_outofspace(annex_path):
             stderr="junk around not enough free space, need 905.6 MB more and after"
         )
 
-    with patch.object(GitWitlessRunner, 'run_on_filelist_chunks', raise_cmderror) as cma, \
+    with \
+            patch.object(GitWitlessRunner,
+                         'gen_run_on_filelist_chunks',
+                         raise_cmderror) as cma, \
             assert_raises(OutOfSpaceError) as cme:
-        ar.get("file")
+        list(ar.get("file"))
     exc = cme.exception
     eq_(exc.sizemore_msg, '905.6 MB')
     assert_re_in(".*annex.*(find|get).*needs 905.6 MB more", str(exc), re.DOTALL)
@@ -289,12 +292,12 @@ def test_AnnexRepo_get_remote_na(src, path):
     ar = AnnexRepo.clone(src, path)
 
     with assert_raises(RemoteNotAvailableError) as cme:
-        ar.get('test-annex.dat', options=["--from=NotExistingRemote"])
+        tuple(ar.get('test-annex.dat', options=["--from=NotExistingRemote"]))
     eq_(cme.exception.remote, "NotExistingRemote")
 
     # and similar one whenever invoking with remote parameter
     with assert_raises(RemoteNotAvailableError) as cme:
-        ar.get('test-annex.dat', remote="NotExistingRemote")
+        tuple(ar.get('test-annex.dat', remote="NotExistingRemote"))
     eq_(cme.exception.remote, "NotExistingRemote")
 
 
@@ -789,7 +792,7 @@ def test_AnnexRepo_on_uninited_annex(src, path):
     annex = AnnexRepo(path, create=False, init=False)  # so we can initialize without
     # and still can get our things
     assert_false(annex.file_has_content('test-annex.dat'))
-    annex.get('test-annex.dat')
+    tuple(annex.get('test-annex.dat'))
     ok_(annex.file_has_content('test-annex.dat'))
 
 
@@ -907,51 +910,7 @@ def test_AnnexRepo_get(src, dst):
     testfile_abs = opj(dst, testfile)
     assert_false(annex.file_has_content("test-annex.dat"))
     with swallow_outputs():
-        annex.get(testfile)
-    ok_(annex.file_has_content("test-annex.dat"))
-    ok_file_has_content(testfile_abs, "content to be annex-addurl'd", strip=True)
-
-    called = []
-    # for some reason yoh failed mock to properly just call original func
-    orig_run = annex._git_runner.run_on_filelist_chunks
-
-    def check_run(cmd, files, **kwargs):
-        cmd_name = cmd[cmd.index('annex') + 1]
-        called.append(cmd_name)
-        if cmd_name == 'find':
-            assert_not_in('-J5', cmd)
-        elif cmd_name == 'get':
-            assert_in('-J5', cmd)
-        else:
-            raise AssertionError(
-                "no other commands so far should be ran. Got %s" % cmd
-            )
-        return orig_run(cmd, files, **kwargs)
-
-    annex.drop(testfile)
-    with patch.object(GitWitlessRunner, 'run_on_filelist_chunks',
-                      side_effect=check_run, auto_spec=True), \
-            swallow_outputs():
-        annex.get(testfile, jobs=5)
-    eq_(called, ['find', 'get'])
-    ok_file_has_content(testfile_abs, "content to be annex-addurl'd", strip=True)
-
-
-@with_tempfile
-@with_tempfile
-def test_AnnexRepo_gen_get(src, dst):
-    ar = AnnexRepo(src)
-    (ar.pathobj / 'test-annex.dat').write_text(
-        "content to be annex-addurl'd")
-    ar.save('some')
-
-    annex = AnnexRepo.clone(src, dst)
-    assert_is_instance(annex, AnnexRepo, "AnnexRepo was not created.")
-    testfile = 'test-annex.dat'
-    testfile_abs = opj(dst, testfile)
-    assert_false(annex.file_has_content("test-annex.dat"))
-    with swallow_outputs():
-        result = list(annex.gen_get(testfile))
+        result = list(annex.get(testfile))
     assert_true(result[0]["success"])
     ok_(annex.file_has_content("test-annex.dat"))
     ok_file_has_content(testfile_abs, "content to be annex-addurl'd", strip=True)
@@ -980,7 +939,7 @@ def test_AnnexRepo_gen_get(src, dst):
                       side_effect=check_run,
                       auto_spec=True), \
             swallow_outputs():
-        result = list(annex.gen_get(testfile, jobs=5))
+        result = list(annex.get(testfile, jobs=5))
     assert_true(result[0]["success"])
     eq_(called, ['find', 'get'])
     ok_file_has_content(testfile_abs, "content to be annex-addurl'd", strip=True)
@@ -1024,7 +983,7 @@ def _test_AnnexRepo_get_contentlocation(batch, src, path, work_dir_outside):
     eq_(annex.get_contentlocation(key, batch=batch), '')
 
     with swallow_outputs() as cmo:
-        annex.get(fname)
+        tuple(annex.get(fname))
     key_location = annex.get_contentlocation(key, batch=batch)
     assert(key_location)
 
@@ -1397,7 +1356,7 @@ def test_annex_copy_to(src, origin, clone):
     # test-annex.dat has no content to copy yet:
     eq_(repo.copy_to("test-annex.dat", "target"), [])
 
-    repo.get("test-annex.dat")
+    tuple(repo.get("test-annex.dat"))
     # now it has:
     eq_(repo.copy_to("test-annex.dat", "target"), ["test-annex.dat"])
     # and will not be copied again since it was already copied
@@ -1474,7 +1433,7 @@ def test_annex_drop(src, dst):
     ar = AnnexRepo.clone(src, dst)
     testfile = 'test-annex.dat'
     assert_false(ar.file_has_content(testfile))
-    ar.get(testfile)
+    tuple(ar.get(testfile))
     ok_(ar.file_has_content(testfile))
     eq_(len([f for f in ar.fsck(fast=True) if f['file'] == testfile]), 1)
 
@@ -1487,7 +1446,7 @@ def test_annex_drop(src, dst):
     eq_(result[0]['success'], True)
     eq_(result[0]['file'], testfile)
 
-    ar.get(testfile)
+    tuple(ar.get(testfile))
 
     # drop file by key:
     testkey = ar.get_file_key(testfile)

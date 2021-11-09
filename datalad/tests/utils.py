@@ -463,7 +463,7 @@ def ok_annex_get(ar, files, network=True):
     """
     ok_git_config_not_empty(ar) # we should be working in already inited repo etc
     with swallow_outputs() as cmo:
-        ar.get(files)
+        list(ar.get(files))
     # verify that load was fetched
     ok_git_config_not_empty(ar) # whatever we do shouldn't destroy the config file
     has_content = ar.file_has_content(files)

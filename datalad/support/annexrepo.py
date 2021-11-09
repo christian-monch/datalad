@@ -1224,6 +1224,36 @@ class AnnexRepo(GitRepo, RepoInterface):
             # Note: insert additional code here to analyse failure and possibly
             # raise a custom exception
 
+            # OutOfSpaceError:
+            # Note:
+            # doesn't depend on anything in stdout. Therefore check this before
+            # dealing with stdout
+            out_of_space_re = re.search(
+                "not enough free space, need (.*) more", e.stderr
+            )
+            if out_of_space_re:
+                raise OutOfSpaceError(cmd=['annex'] + args,
+                                      sizemore_msg=out_of_space_re.groups()[0])
+
+            # RemoteNotAvailableError:
+            remote_na_re = re.search(
+                "there is no available git remote named \"(.*)\"", e.stderr
+            )
+            if remote_na_re:
+                raise RemoteNotAvailableError(cmd=['annex'] + args,
+                                              remote=remote_na_re.groups()[0])
+
+            # TEMP: Workaround for git-annex bug, where it reports success=True
+            # for annex add, while simultaneously complaining, that it is in
+            # a submodule:
+            # TODO: For now just reraise. But independently on this bug, it
+            # makes sense to have an exception for that case
+            in_subm_re = re.search(
+                "fatal: Pathspec '(.*)' is in submodule '(.*)'", e.stderr
+            )
+            if in_subm_re:
+                raise e
+
             # if we didn't raise before, just depend on whether or not we seem
             # to have some json to return. It should contain information on
             # failure in keys 'success' and 'note'
@@ -1630,7 +1660,7 @@ class AnnexRepo(GitRepo, RepoInterface):
         self.config.reload()
 
     @normalize_paths
-    def get(self, files, remote=None, options=None, jobs=None, key=False):
+    def old_get(self, files, remote=None, options=None, jobs=None, key=False):
         """Get the actual content of files
 
         Parameters
@@ -1765,8 +1795,7 @@ class AnnexRepo(GitRepo, RepoInterface):
                 unknown_sizes.append(j['file'])
         return expected_files, fetch_files
 
-    # That does not work with generators: @normalize_paths
-    def gen_get(self, files, remote=None, options=None, jobs=None, key=False):
+    def get(self, files, remote=None, options=None, jobs=None, key=False):
         """Get the actual content of files
 
         Parameters
@@ -4067,15 +4096,6 @@ class GeneratorAnnexJsonProtocol(GeneratorMixIn, AnnexJsonProtocol):
 
     def add_to_stdout(self, data):
         self.send_result(("stdout", data.decode(self.encoding)))
-
-    def pipe_data_received(self, fd, data):
-
-        if fd != STDOUT_FILENO:
-            assert fd == STDERR_FILENO, f"Unknown file descriptor: ({fd})"
-            self.send_result(("stderr", data.decode(self.encoding)))
-            return
-
-        AnnexJsonProtocol.pipe_data_received(self, fd, data)
 
 
 class AnnexInitOutput(WitlessProtocol):
