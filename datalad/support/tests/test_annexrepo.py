@@ -2651,10 +2651,13 @@ def test_generator_annex_json_protocol():
     for result in runner.run(cmd="cat", protocol=GeneratorAnnexJsonProtocol, stdin=stdin_queue):
         assert_equal(
             result,
-            {
-                "id": "some-id",
-                "count": count,
-            }
+            (
+                "stdout_json",
+                {
+                    "id": "some-id",
+                    "count": count,
+                }
+            )
         )
         if count == 133:
             break
