@@ -952,13 +952,13 @@ def test_AnnexRepo_gen_get(src, dst):
     assert_false(annex.file_has_content("test-annex.dat"))
     with swallow_outputs():
         result = list(annex.gen_get(testfile))
-    print(result)
+    assert_true(result[0]["success"])
     ok_(annex.file_has_content("test-annex.dat"))
     ok_file_has_content(testfile_abs, "content to be annex-addurl'd", strip=True)
 
     called = []
     # for some reason yoh failed mock to properly just call original func
-    orig_run = annex._git_runner.generator_run_on_filelist_chunks
+    orig_run = annex._git_runner.gen_run_on_filelist_chunks
 
     def check_run(cmd, files, **kwargs):
         cmd_name = cmd[cmd.index('annex') + 1]
@@ -976,12 +976,12 @@ def test_AnnexRepo_gen_get(src, dst):
     annex.drop(testfile)
     with \
             patch.object(GitWitlessRunner,
-                      'generator_run_on_filelist_chunks',
+                      'gen_run_on_filelist_chunks',
                       side_effect=check_run,
                       auto_spec=True), \
             swallow_outputs():
         result = list(annex.gen_get(testfile, jobs=5))
-    print(result)
+    assert_true(result[0]["success"])
     eq_(called, ['find', 'get'])
     ok_file_has_content(testfile_abs, "content to be annex-addurl'd", strip=True)
 

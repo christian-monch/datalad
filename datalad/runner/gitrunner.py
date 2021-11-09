@@ -202,13 +202,13 @@ class GitWitlessRunner(WitlessRunner, GitRunnerBase):
                     results[k] += v
         return results
 
-    def generator_run_on_filelist_chunks(self,
-                                         cmd,
-                                         files,
-                                         protocol=None,
-                                         cwd=None,
-                                         env=None,
-                                         **kwargs):
+    def gen_run_on_filelist_chunks(self,
+                                   cmd,
+                                   files,
+                                   protocol=None,
+                                   cwd=None,
+                                   env=None,
+                                   **kwargs):
         """
         see run_on_filelist_chunks
         """

@@ -923,24 +923,146 @@ class AnnexRepo(GitRepo, RepoInterface):
         if self.fake_dates_enabled:
             env = self.add_fake_dates(runner.env)
 
+        assert not issubclass(protocol, GeneratorMixIn)
         try:
             if files:
-                if issubclass(protocol, GeneratorMixIn):
-                    return runner.generator_run_on_filelist_chunks(
-                        cmd,
-                        files,
-                        protocol=protocol,
-                        env=env,
-                        **kwargs)
-                else:
-                    return runner.run_on_filelist_chunks(
-                        cmd,
-                        files,
-                        protocol=protocol,
-                        env=env,
-                        **kwargs)
+                return runner.run_on_filelist_chunks(
+                    cmd,
+                    files,
+                    protocol=protocol,
+                    env=env,
+                    **kwargs)
             else:
                 return runner.run(
+                    cmd,
+                    stdin=stdin,
+                    protocol=protocol,
+                    env=env,
+                    **kwargs)
+        except CommandError as e:
+            # Note: A call might result in several 'failures', that can be or
+            # cannot be handled here. Detection of something, we can deal with,
+            # doesn't mean there's nothing else to deal with.
+
+            # OutOfSpaceError:
+            # Note:
+            # doesn't depend on anything in stdout. Therefore check this before
+            # dealing with stdout
+            out_of_space_re = re.search(
+                "not enough free space, need (.*) more", e.stderr
+            )
+            if out_of_space_re:
+                raise OutOfSpaceError(cmd=['annex'] + args,
+                                      sizemore_msg=out_of_space_re.groups()[0])
+
+            # RemoteNotAvailableError:
+            remote_na_re = re.search(
+                "there is no available git remote named \"(.*)\"", e.stderr
+            )
+            if remote_na_re:
+                raise RemoteNotAvailableError(cmd=['annex'] + args,
+                                              remote=remote_na_re.groups()[0])
+
+            # TEMP: Workaround for git-annex bug, where it reports success=True
+            # for annex add, while simultaneously complaining, that it is in
+            # a submodule:
+            # TODO: For now just reraise. But independently on this bug, it
+            # makes sense to have an exception for that case
+            in_subm_re = re.search(
+                "fatal: Pathspec '(.*)' is in submodule '(.*)'", e.stderr
+            )
+            if in_subm_re:
+                raise e
+
+            # we don't know how to handle this, just pass it on
+            raise
+
+    def _gen_call_annex(self,
+                    args,
+                    files=None,
+                    jobs=None,
+                    protocol=StdOutErrCapture,
+                    git_options=None,
+                    stdin=None,
+                    merge_annex_branches=True,
+                    **kwargs):
+        """Internal helper to run git-annex commands with generator result
+
+        For description of parameters see _call_annex
+
+        Returns
+        -------
+        Generator
+          Return value of WitlessRunner.run(). The content of the elements
+          that the generator returns are determined by the given
+          `protocol`.
+
+        Raises
+        ------
+        CommandError
+          If the call exits with a non-zero status.
+
+        OutOfSpaceError
+          If a corresponding statement was detected in git-annex's output on
+          stderr. Only supported if the given protocol captured stderr.
+
+        RemoteNotAvailableError
+          If a corresponding statement was detected in git-annex's output on
+          stderr. Only supported if the given protocol captured stderr.
+        """
+        if self.git_annex_version is None:
+            self._check_git_annex_version()
+
+        # git portion of the command
+        cmd = ['git'] + self._ANNEX_GIT_COMMON_OPTIONS
+
+        if git_options:
+            cmd += git_options
+
+        if not self.always_commit:
+            cmd += ['-c', 'annex.alwayscommit=false']
+
+        if not merge_annex_branches:
+            cmd += ['-c', 'annex.merge-annex-branches=false']
+
+        # annex portion of the command
+        cmd.append('annex')
+        cmd += args
+
+        if lgr.getEffectiveLevel() <= 8:
+            cmd.append('--debug')
+
+        if self._annex_common_options:
+            cmd += self._annex_common_options
+
+        if jobs == 'auto':
+            # Limit to # of CPUs (but at least 3 to start with)
+            # and also an additional config constraint (by default 1
+            # due to https://github.com/datalad/datalad/issues/4404)
+            jobs = self._n_auto_jobs or min(
+                self.config.obtain('datalad.runtime.max-annex-jobs'),
+                max(3, cpu_count()))
+            # cache result to avoid repeated calls to cpu_count()
+            self._n_auto_jobs = jobs
+        if jobs and jobs != 1:
+            cmd.append('-J%d' % jobs)
+
+        runner = self._git_runner
+        env = None
+        if self.fake_dates_enabled:
+            env = self.add_fake_dates(runner.env)
+
+        assert issubclass(protocol, GeneratorMixIn)
+        try:
+            if files:
+                yield from runner.gen_run_on_filelist_chunks(
+                    cmd,
+                    files,
+                    protocol=protocol,
+                    env=env,
+                    **kwargs)
+            else:
+                yield from runner.run(
                     cmd,
                     stdin=stdin,
                     protocol=protocol,
@@ -1046,7 +1168,7 @@ class AnnexRepo(GitRepo, RepoInterface):
         output_received = False
         output_json_received = False
         try:
-            for category, json_or_string in self._call_annex(
+            for category, json_or_string in self._gen_call_annex(
                     args,
                     files=files,
                     jobs=jobs,
