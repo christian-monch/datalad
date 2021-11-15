@@ -50,8 +50,8 @@ from ..protocol import (
     WitlessProtocol,
 )
 from ..runnerthreads import (
-    BlockingOSReaderThread,
-    BlockingOSWriterThread,
+    ReadThread,
+    WriteThread,
 )
 from .utils import py2cmd
 
@@ -152,54 +152,64 @@ def test_interactive_communication():
 
 
 def test_blocking_thread_exit():
+    read_queue = queue.Queue()
+
     (read_descriptor, write_descriptor) = os.pipe()
     read_file = os.fdopen(read_descriptor, "rb")
-
-    reader_thread = BlockingOSReaderThread(read_file)
-    reader_thread.start()
-    read_queue = reader_thread.queue
+    read_thread = ReadThread(
+        identifier=read_descriptor,
+        source=read_file,
+        destination_queue=read_queue,
+        signal_queues=[]
+    )
+    read_thread.start()
 
     os.write(write_descriptor, b"some data")
-    assert_true(reader_thread.is_alive())
-    data = read_queue.get()
+    assert_true(read_thread.is_alive())
+    identifier, state, data = read_queue.get()
     eq_(data, b"some data")
 
-    reader_thread.request_exit()
+    read_thread.request_exit()
 
     # Check the blocking part
-    sleep(3)
-    assert_true(reader_thread.is_alive())
+    sleep(.3)
+    assert_true(read_thread.is_alive())
 
     # Check actual exit, we will not get
     # "more data" when exit was requested,
     # because the thread will not attempt
     # a write
     os.write(write_descriptor, b"more data")
-    reader_thread.join()
+    read_thread.join()
+    print(read_queue.queue)
     assert_true(read_queue.empty())
 
 
 def test_blocking_read_exception_catching():
+    read_queue = queue.Queue()
+
     (read_descriptor, write_descriptor) = os.pipe()
     read_file = os.fdopen(read_descriptor, "rb")
-
-    reader_thread = BlockingOSReaderThread(read_file)
-    reader_thread.start()
-    read_queue = reader_thread.queue
+    read_thread = ReadThread(
+        identifier=read_descriptor,
+        source=read_file,
+        destination_queue=read_queue,
+        signal_queues=[read_queue]
+    )
+    read_thread.start()
 
     os.write(write_descriptor, b"some data")
-    assert_true(reader_thread.is_alive())
-    data = read_queue.get()
+    assert_true(read_thread.is_alive())
+    identifier, state, data = read_queue.get()
     eq_(data, b"some data")
     os.close(write_descriptor)
-    reader_thread.join()
-    data = read_queue.get()
+    read_thread.join()
+    identifier, state, data = read_queue.get()
     eq_(data, None)
 
 
 def test_blocking_read_closing():
-    # Expect that the blocking OS reader thread
-    # exits when os.read throws an error.
+    # Expect that a reader thread exits when os.read throws an error.
     class FakeFile:
         def fileno(self):
             return -1
@@ -207,93 +217,124 @@ def test_blocking_read_closing():
     def fake_read(*args):
         raise ValueError("test exception")
 
+    read_queue = queue.Queue()
     with patch("datalad.runner.runnerthreads.os.read") as read:
         read.side_effect = fake_read
 
-        reader_thread = BlockingOSReaderThread(FakeFile())
-        reader_thread.start()
-        reader_thread.join()
+        read_thread = ReadThread(
+            identifier=-1,
+            source=FakeFile(),
+            destination_queue=None,
+            signal_queues=[read_queue])
 
-    read_queue = reader_thread.queue
-    data = read_queue.get()
+        read_thread.start()
+        read_thread.join()
+
+    identifier, state, data = read_queue.get()
     eq_(data, None)
 
 
 def test_blocking_write_exception_catching():
-    # Expect that the blocking OS writer catches exceptions
-    # and exits gracefully.
+    # Expect that a blocking writer catches exceptions and exits gracefully.
+
+    write_queue = queue.Queue()
+    signal_queue = queue.Queue()
+
     (read_descriptor, write_descriptor) = os.pipe()
     write_file = os.fdopen(write_descriptor, "rb")
-    signal_queue = queue.Queue()
-    writer_thread = BlockingOSWriterThread(write_file, signal_queue)
-    writer_thread.start()
-    writer_queue = writer_thread.queue
+    write_thread = WriteThread(
+        identifier=write_descriptor,
+        source_queue=write_queue,
+        destination=write_file,
+        signal_queues=[signal_queue]
+    )
+    write_thread.start()
 
-    writer_queue.put(b"some data")
+    write_queue.put(b"some data")
     data = os.read(read_descriptor, 1024)
     eq_(data, b"some data")
 
     os.close(read_descriptor)
     os.close(write_descriptor)
 
-    writer_queue.put(b"more data")
-    writer_thread.join()
-    eq_(signal_queue.get(), None)
+    write_queue.put(b"more data")
+    write_thread.join()
+    eq_(signal_queue.get(), (write_descriptor, IOState.ok, None))
 
 
 def test_blocking_writer_closing():
-    # Expect that the blocking OS writer closes
-    # its file when `None` is sent to it.
+    # Expect that a blocking writer closes its file when `None` is sent to it.
+    write_queue = queue.Queue()
+    signal_queue = queue.Queue()
+
     (read_descriptor, write_descriptor) = os.pipe()
     write_file = os.fdopen(write_descriptor, "rb")
-    signal_queue = queue.Queue()
-    writer_thread = BlockingOSWriterThread(write_file, signal_queue)
-    writer_thread.start()
-    writer_queue = writer_thread.queue
+    write_thread = WriteThread(
+        identifier=write_descriptor,
+        source_queue=write_queue,
+        destination=write_file,
+        signal_queues=[signal_queue]
+    )
+    write_thread.start()
 
-    writer_queue.put(b"some data")
+    write_queue.put(b"some data")
     data = os.read(read_descriptor, 1024)
     eq_(data, b"some data")
 
-    writer_queue.put(None)
-    writer_thread.join()
-    eq_(signal_queue.get(), None)
+    write_queue.put(None)
+    write_thread.join()
+    eq_(signal_queue.get(), (write_descriptor, IOState.ok, None))
 
 
 def test_blocking_writer_closing_timeout_signal():
-    # Expect that the blocking OS writer does not
-    # block forever on a full signal queue
-    (read_descriptor, write_descriptor) = os.pipe()
-    write_file = os.fdopen(write_descriptor, "rb")
+    # Expect that writer or reader do not block forever on a full signal queue
+
+    write_queue = queue.Queue()
     signal_queue = queue.Queue(1)
     signal_queue.put("This is data")
 
-    writer_thread = BlockingOSWriterThread(write_file, signal_queue)
-    writer_thread.start()
-    writer_queue = writer_thread.queue
+    (read_descriptor, write_descriptor) = os.pipe()
+    write_file = os.fdopen(write_descriptor, "rb")
+    write_thread = WriteThread(
+        identifier=write_descriptor,
+        source_queue=write_queue,
+        destination=write_file,
+        signal_queues=[signal_queue]
+    )
+    write_thread.start()
 
-    writer_queue.put(b"some data")
+    write_queue.put(b"some data")
     data = os.read(read_descriptor, 1024)
     eq_(data, b"some data")
 
-    writer_queue.put(None)
-    writer_thread.join()
+    write_queue.put(None)
+    write_thread.join()
     eq_(signal_queue.get(), "This is data")
 
 
 def test_blocking_writer_closing_no_signal():
+    # Expect that writer or reader do not block forever on a full signal queue
+
+    write_queue = queue.Queue()
+    signal_queue = queue.Queue(1)
+    signal_queue.put("This is data")
+
     (read_descriptor, write_descriptor) = os.pipe()
     write_file = os.fdopen(write_descriptor, "rb")
-    writer_thread = BlockingOSWriterThread(write_file)
-    writer_thread.start()
-    writer_queue = writer_thread.queue
+    write_thread = WriteThread(
+        identifier=write_descriptor,
+        source_queue=write_queue,
+        destination=write_file,
+        signal_queues=[signal_queue]
+    )
+    write_thread.start()
 
-    writer_queue.put(b"some data")
+    write_queue.put(b"some data")
     data = os.read(read_descriptor, 1024)
     eq_(data, b"some data")
 
-    writer_queue.put(None)
-    writer_thread.join()
+    write_queue.put(None)
+    write_thread.join()
 
 
 def test_inside_async():
@@ -413,11 +454,12 @@ def test_timeout_all():
         timeout=.1,
         protocol_kwargs=dict(timeout_queue=timeout_queue)
     )
-    # This is not a very nice, but on some systems the
-    # stdin pipe might not be filled with the data that
-    # we wrote, and will therefore not create a timeout,
-    # e.g. on Windows.
-    assert_true(len(timeout_queue) in (3, 4))
+    # Expect at least one timeout for stdout, stderr, stdin, and the
+    # process. There might be more.
+    sources = (0, 1, 2, None)
+    assert_true(len(timeout_queue) >= len(sources))
+    for source in sources:
+        assert_true(any(filter(lambda t: t[1] == source, timeout_queue)))
 
 
 def test_exit_0():

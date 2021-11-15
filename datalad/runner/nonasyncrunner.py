@@ -35,12 +35,12 @@ from .protocol import (
     WitlessProtocol,
 )
 from .runnerthreads import (
-    BlockingOSReaderThread,
-    BlockingOSWriterThread,
     IOState,
     ReadThread,
+    TimeoutThread,
     WriteThread,
 )
+
 
 lgr = logging.getLogger("datalad.runner.nonasyncrunner")
 
@@ -236,12 +236,12 @@ class ThreadedRunner:
         self.process_stdin_fileno = None
         self.process_stdout_fileno = None
         self.process_stderr_fileno = None
-        self.stderr_reader_thread = None
         self.stderr_enqueueing_thread = None
-        self.stdout_reader_thread = None
         self.stdout_enqueueing_thread = None
-        self.stdin_writer_thread = None
         self.stdin_enqueueing_thread = None
+        self.stderr_timeout_thread = None
+        self.stdout_timeout_thread = None
+        self.stdin_timeout_thread = None
         self.process_running = False
         self.fileno_mapping = None
         self.fileno_to_file = None
@@ -349,45 +349,55 @@ class ThreadedRunner:
         self.active_file_numbers = set()
         self.output_queue = Queue()
 
+
         if self.catch_stdout or self.catch_stderr or self.write_stdin:
 
             if self.catch_stderr:
+                if self.timeout is not None:
+                    self.stderr_timeout_thread = TimeoutThread(
+                        self.process_stderr_fileno,
+                        self.timeout,
+                        [self.output_queue])
+                    self.stderr_timeout_thread.start()
                 self.active_file_numbers.add(self.process_stderr_fileno)
-                self.stderr_reader_thread = BlockingOSReaderThread(self.process.stderr)
                 self.stderr_enqueueing_thread = ReadThread(
                     identifier=self.process_stderr_fileno,
-                    source_blocking_queue=self.stderr_reader_thread.queue,
+                    source=self.process.stderr,
                     destination_queue=self.output_queue,
                     signal_queues=[self.output_queue],
-                    timeout=self.timeout)
-                self.stderr_reader_thread.start()
+                    timeout_thread=self.stderr_timeout_thread)
                 self.stderr_enqueueing_thread.start()
 
             if self.catch_stdout:
+                if self.timeout is not None:
+                    self.stdout_timeout_thread = TimeoutThread(
+                        self.process_stdout_fileno,
+                        self.timeout,
+                        [self.output_queue])
+                    self.stdout_timeout_thread.start()
                 self.active_file_numbers.add(self.process_stdout_fileno)
-                self.stdout_reader_thread = BlockingOSReaderThread(self.process.stdout)
                 self.stdout_enqueueing_thread = ReadThread(
                     identifier=self.process_stdout_fileno,
-                    source_blocking_queue=self.stdout_reader_thread.queue,
+                    source=self.process.stdout,
                     destination_queue=self.output_queue,
                     signal_queues=[self.output_queue],
-                    timeout=self.timeout)
-                self.stdout_reader_thread.start()
+                    timeout_thread=self.stdout_timeout_thread)
                 self.stdout_enqueueing_thread.start()
 
             if self.write_stdin:
+                if self.timeout is not None:
+                    self.stdin_timeout_thread = TimeoutThread(
+                        self.process_stdin_fileno,
+                        self.timeout,
+                        [self.output_queue])
+                    self.stdin_timeout_thread.start()
                 self.active_file_numbers.add(self.process_stdin_fileno)
-                # Use the WriterThread source queue to signal file close
-                # on write error to us.
-                self.stdin_writer_thread = BlockingOSWriterThread(
-                    self.process.stdin, self.stdin_queue)
                 self.stdin_enqueueing_thread = WriteThread(
                     identifier=self.process_stdin_fileno,
                     source_queue=self.stdin_queue,
-                    destination_blocking_queue=self.stdin_writer_thread.queue,
-                    signal_queues=[self.output_queue, self.stdin_writer_thread.queue],
-                    timeout=self.timeout)
-                self.stdin_writer_thread.start()
+                    destination=self.process.stdin,
+                    signal_queues=[self.output_queue],
+                    timeout_thread=self.stdin_timeout_thread)
                 self.stdin_enqueueing_thread.start()
 
         if issubclass(self.protocol_class, GeneratorMixIn):
@@ -461,7 +471,8 @@ class ThreadedRunner:
                 # the file number that caused the timeout from
                 # active files and return.
                 if self.protocol.timeout(self.fileno_mapping[file_number]) is True:
-                    self.active_file_numbers.remove(file_number)
+                    if file_number in self.active_file_numbers:
+                        self.active_file_numbers.remove(file_number)
                     return
 
         # No timeout occurred, we have proper data or EOF indicators.
@@ -473,6 +484,7 @@ class ThreadedRunner:
                 self.fileno_mapping[self.process_stdin_fileno],
                 None)  # TODO: check exception
             self.active_file_numbers.remove(self.process_stdin_fileno)
+            self.process.stdin.close()
 
         elif self.catch_stderr or self.catch_stdout:
             if data is None:
@@ -538,12 +550,12 @@ class ThreadedRunner:
             return True
 
     def wait_for_threads(self):
-        for thread in (self.stderr_reader_thread,
-                       self.stdout_reader_thread,
-                       self.stdin_writer_thread,
-                       self.stderr_enqueueing_thread,
+        for thread in (self.stderr_enqueueing_thread,
                        self.stdout_enqueueing_thread,
-                       self.stdin_enqueueing_thread):
+                       self.stdin_enqueueing_thread,
+                       self.stderr_timeout_thread,
+                       self.stdout_timeout_thread,
+                       self.stdin_timeout_thread):
             if thread is not None:
                 thread.request_exit()
                 thread.join()
