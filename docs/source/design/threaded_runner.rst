@@ -19,19 +19,37 @@ Datalad often requires the execution of subprocesses. While subprocesses are exe
 
 Since non-blocking IO and waiting on multiple sources (poll or select) differs vastly in terms of capabilities and API on different OSs, we decided to use blocking IO and threads to multiplex reading from different sources.
 
-Generally we have a number of threads. Each thread can read from either a single queue or a file descriptor. Reading is done blocking. Each thread can put data into multiple queues. This is used to transport data that was read as well as for signaling conditions like closed file descriptors.
+Generally we have a number of threads that might be created and executed, depending on the need for writing to stdin or reading from stdout or stderr. Each thread can read from either a single queue or a file descriptor. Reading is done blocking. Each thread can put data into multiple queues. This is used to transport data that was read as well as for signaling conditions like closed file descriptors.
 
-Conceptually, there are three layers of threads:
+Conceptually, there are the main thread and two different types of threads:
 
- - layer 1: main thread
- - layer 2: transport threads (1 per process I/O descriptor)
- - layer 3: blocking OS reading/writing threads (1 per process I/O descriptor)
+ - type 1: transport threads (1 per process I/O descriptor)
+ - type 2: timeout threads (only if timeout is not `None`: 1 per active I/O descriptor)
 
-Besides the main thread, there are two additional threads for stdin, for stdout, and for stderr capture. One of those threads reads from or writes to a file desriptor in a tight loop. It will exit if either the file descriptor is closed, if an error occurs on reading, if get() on the input queue yields `None`, or if an exit was requested by `thread.request_exit()` and the thread is unblocked on read/write/get(). Threads put data either in infinite queues or in finite queues if it takes no longer than 1 second.
+Transport Threads
+.................
 
-The blocking OS threads in layer 3 are mainly used to enable timeouts of all operations in threads of layer 2.
+Besides the main thread, there might be up to three additional threads to handle data transfer to `stdin`, and from `stdout` and `stderr`. Each of those threads copies data between queues and file descriptors in a tight loop. The stdin-thread reads from an input-queue, the stdout- and stderr-threads write to an output queue. Each thread signals its exit to a set of signal queues, which might be identical to the output queues.
 
-The main thread waits on the `output_queue`, into which the other threads feed directly or indirectly.
+The `stdin`-thread reads data from a queue and writes it to the `stdin`-file descriptor of the sub-process. If it reads `None` from the queue, it will exit. The thread will also exit, if an exit is requested by calling `thread.request_exit()`, or if an error occurs during writing. In all cases it will enqueue a `None` to all its signal-queues.
+
+The `stdout`- and `stderr`-threads read from the respective file descriptor and enqueue data into their output queue, unless the data has zero length (which indicates a closed descriptor). On a zero-length read they exit and enqueue `None` into their signal queues.
+
+All queues are infinite. Nevertheless signaling is performed with a timeout of one 100 milli seconds in order to ensure that threads can exit.
+
+
+Timeout Threads
+...............
+
+Timeout threads are created of the timeout-argument to `ThreadedRunner.run()` is not `None`. One timeout thread is created for each file descriptor that has a thread "attached". The timeout-threads consist of a single loop in wich the threads sleep for the specified timeout, using `time.sleep()`. After returning from `time.sleep()`, they check whether they have been reset by calling `time.sleep()` on them. If not, they will enqueue a timeout-message to their signal queues, again with a timeout of 100 milli seconds.
+
+
+Main Thread
+...........
+
+There is a single queue, the `output_queue`, on which the main thread waits, after all threads are started. The `output_queue` is the signaling queue and the output queue of the stderr-thread and the stdout-thread. It is also the signaling queue of the stdin-thread, and it is the signaling queue for all timeout-threads.
+
+The main thread waits on the `output_queue` for data or signals and handles them accordingly, i.e. calls data callbacks of the protocol if data arrives, calls timeout callbacks of the protocol if timeouts arrive, and calls connection-related callbacks of the protocol if other signals arrive. It also handles the closing of `stdin`-, `stdout`-, and `stderr`-file descriptors if the transport threads exit. These tasks are either done in the method `ThreadedRunner.run()` or in a result generator that is returned by  `ThreadedRunner.run()` whenever `send()` is called on it.
 
 
 Protocols
