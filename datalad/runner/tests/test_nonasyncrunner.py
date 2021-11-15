@@ -157,7 +157,8 @@ def test_blocking_thread_exit():
     (read_descriptor, write_descriptor) = os.pipe()
     read_file = os.fdopen(read_descriptor, "rb")
     read_thread = ReadThread(
-        identifier=read_descriptor,
+        identifier="test thread",
+        user_info=read_descriptor,
         source=read_file,
         destination_queue=read_queue,
         signal_queues=[]
@@ -191,7 +192,8 @@ def test_blocking_read_exception_catching():
     (read_descriptor, write_descriptor) = os.pipe()
     read_file = os.fdopen(read_descriptor, "rb")
     read_thread = ReadThread(
-        identifier=read_descriptor,
+        identifier="test thread",
+        user_info=read_descriptor,
         source=read_file,
         destination_queue=read_queue,
         signal_queues=[read_queue]
@@ -214,6 +216,9 @@ def test_blocking_read_closing():
         def fileno(self):
             return -1
 
+        def close(self):
+            pass
+
     def fake_read(*args):
         raise ValueError("test exception")
 
@@ -222,7 +227,8 @@ def test_blocking_read_closing():
         read.side_effect = fake_read
 
         read_thread = ReadThread(
-            identifier=-1,
+            identifier="test thread",
+            user_info=None,
             source=FakeFile(),
             destination_queue=None,
             signal_queues=[read_queue])
@@ -243,7 +249,8 @@ def test_blocking_write_exception_catching():
     (read_descriptor, write_descriptor) = os.pipe()
     write_file = os.fdopen(write_descriptor, "rb")
     write_thread = WriteThread(
-        identifier=write_descriptor,
+        identifier="test thread",
+        user_info=write_descriptor,
         source_queue=write_queue,
         destination=write_file,
         signal_queues=[signal_queue]
@@ -270,7 +277,8 @@ def test_blocking_writer_closing():
     (read_descriptor, write_descriptor) = os.pipe()
     write_file = os.fdopen(write_descriptor, "rb")
     write_thread = WriteThread(
-        identifier=write_descriptor,
+        identifier="test thread",
+        user_info=write_descriptor,
         source_queue=write_queue,
         destination=write_file,
         signal_queues=[signal_queue]
@@ -296,7 +304,8 @@ def test_blocking_writer_closing_timeout_signal():
     (read_descriptor, write_descriptor) = os.pipe()
     write_file = os.fdopen(write_descriptor, "rb")
     write_thread = WriteThread(
-        identifier=write_descriptor,
+        identifier="test thread",
+        user_info=write_descriptor,
         source_queue=write_queue,
         destination=write_file,
         signal_queues=[signal_queue]
@@ -322,7 +331,8 @@ def test_blocking_writer_closing_no_signal():
     (read_descriptor, write_descriptor) = os.pipe()
     write_file = os.fdopen(write_descriptor, "rb")
     write_thread = WriteThread(
-        identifier=write_descriptor,
+        identifier="test thread",
+        user_info=write_descriptor,
         source_queue=write_queue,
         destination=write_file,
         signal_queues=[signal_queue]

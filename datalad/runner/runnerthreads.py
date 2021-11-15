@@ -23,6 +23,13 @@ from typing import (
 lgr = logging.getLogger("datalad.runner.runnerthreads")
 
 
+def _try_close(file: IO):
+    try:
+        file.close()
+    except OSError:
+        pass
+
+
 class IOState(Enum):
     ok = "ok"
     timeout = "timeout"
@@ -104,14 +111,22 @@ class TimeoutThread(ExitingThread):
 class TransportThread(ExitingThread, metaclass=ABCMeta):
     def __init__(self,
                  identifier: str,
+                 user_info: Any,
                  signal_queues: List[Queue],
                  timeout_thread: Optional[TimeoutThread] = None
                  ):
 
         super().__init__()
         self.identifier = identifier
+        self.user_info = user_info
         self.signal_queues = signal_queues
         self.timeout_thread = timeout_thread
+
+    def __repr__(self):
+        return f"Thread<(user_info: {self.user_info}, cmd:{self.identifier})"
+
+    def __str__(self):
+        return self.__repr__()
 
     def signal(self,
                state: IOState,
@@ -120,19 +135,27 @@ class TransportThread(ExitingThread, metaclass=ABCMeta):
             # Ensure that self.signal() will never block.
             # TODO: separate the timeout and EOF signal paths?
             try:
-                queue.put((self.identifier, state, data), block=True, timeout=.1)
+                queue.put((self.user_info, state, data), block=True, timeout=.1)
             except Full:
                 lgr.debug(
                     f"timeout while trying to signal "
-                    f"{(self.identifier, state, data)}")
+                    f"{(self.user_info, state, data)}")
 
     @abstractmethod
     def read(self) -> Union[bytes, None]:
+        """
+        Read data from source return None, if source is close,
+        or destination close is required.
+        """
         raise NotImplementedError
 
     @abstractmethod
     def write(self,
               data: Union[bytes, None]):
+        """
+        Write given data to destination, return True if data is
+        written successfully, False otherwise.
+        """
         raise NotImplementedError
 
     def run(self):
@@ -177,7 +200,8 @@ class TransportThread(ExitingThread, metaclass=ABCMeta):
 
 class ReadThread(TransportThread):
     def __init__(self,
-                 identifier: Any,
+                 identifier: str,
+                 user_info: Any,
                  source: IO,
                  destination_queue: Queue,
                  signal_queues: List[Queue],
@@ -185,7 +209,7 @@ class ReadThread(TransportThread):
                  timeout_thread: Optional[TimeoutThread] = None,
                  ):
 
-        super().__init__(identifier, signal_queues, timeout_thread)
+        super().__init__(identifier, user_info, signal_queues, timeout_thread)
         self.source = source
         self.destination_queue = destination_queue
         self.length = length
@@ -194,7 +218,9 @@ class ReadThread(TransportThread):
         try:
             data = os.read(self.source.fileno(), self.length)
         except (ValueError, OSError):
-            # The source was most likely closed, indicate EOF.
+            # The destination was most likely closed, nevertheless,
+            # try to close it and indicate EOF.
+            _try_close(self.source)
             return None
         return data or None
 
@@ -202,25 +228,31 @@ class ReadThread(TransportThread):
               data: Union[bytes, None]) -> bool:
 
         # We write to an unlimited queue, no need for timeout checking.
-        self.destination_queue.put((self.identifier, IOState.ok, data))
+        self.destination_queue.put((self.user_info, IOState.ok, data))
         return True
 
 
 class WriteThread(TransportThread):
     def __init__(self,
-                 identifier: Any,
+                 identifier: str,
+                 user_info: Any,
                  source_queue: Queue,
                  destination: IO,
                  signal_queues: List[Queue],
                  timeout_thread: Optional[TimeoutThread] = None,
                  ):
 
-        super().__init__(identifier, signal_queues, timeout_thread)
+        super().__init__(identifier, user_info, signal_queues, timeout_thread)
         self.source_queue = source_queue
         self.destination = destination
 
     def read(self) -> Union[bytes, None]:
-        return self.source_queue.get()
+        data = self.source_queue.get()
+        if data is None:
+            # Close stdin file descriptor here, since we know that no more
+            # data will be sent to stdin.
+            _try_close(self.destination)
+        return data
 
     def write(self,
               data: bytes) -> bool:
@@ -230,7 +262,11 @@ class WriteThread(TransportThread):
                 written += os.write(
                     self.destination.fileno(),
                     data[written:])
+                if self.timeout_thread:
+                    self.timeout_thread.reset()
         except (BrokenPipeError, OSError, ValueError):
-            # The destination was most likely closed, indicate EOF.
+            # The destination was most likely closed, nevertheless,
+            # try to close it and indicate EOF.
+            _try_close(self.destination)
             return False
         return True

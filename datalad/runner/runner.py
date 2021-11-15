@@ -66,6 +66,7 @@ class WitlessRunner(object):
             cwd=None,
             env=None,
             timeout=None,
+            exception_on_error=True,
             **kwargs):
         """Execute a command and communicate with it.
 
@@ -105,6 +106,14 @@ class WitlessRunner(object):
           took more than the specified time. See the protocol and
           `ThreadedRunner` descriptions for a more detailed discussion
           on timeouts.
+        exception_on_error : bool, optional
+          This argument is only interpreted if the protocol is a subclass
+          of `GeneratorMixIn`. If it is `True` (default), a
+          `CommandErrorException` is raised by the generator if the
+          sub process exited with a return code not equal to zero. If the
+          parameter is `False`, no exception is raised. In both cases the
+          return code can be read from the attribute `return_code` of
+          the generator.
         kwargs :
           Passed to the Protocol class constructor.
 
@@ -162,7 +171,8 @@ class WitlessRunner(object):
             protocol_kwargs=kwargs,
             cwd=cwd,
             env=env,
-            timeout=timeout
+            timeout=timeout,
+            exception_on_error=exception_on_error
         )
 
         if issubclass(protocol, GeneratorMixIn):
