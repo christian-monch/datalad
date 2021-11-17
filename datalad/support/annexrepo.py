@@ -3027,8 +3027,8 @@ class AnnexRepo(GitRepo, RepoInterface):
             # batch mode is different: we need to compose a JSON request object
             batched = self._batched.get('metadata', json=True, path=self.path)
             for f in files:
-                res = batched.proc1(json.dumps({'file': f}))
-                yield _format_response(res)
+                result = batched(json.dumps({'file': f}))
+                yield _format_response(result)
 
     def set_metadata(
             self, files, reset=None, add=None, init=None,
@@ -3764,8 +3764,8 @@ def readlines_until_ok_or_failed(stdout, maxlines=100):
     return out.rstrip()
 
 
-def readline_json(stdout):
-    toload = stdout.readline().strip()
+def readline_json(toload):
+    toload = toload.strip()
     return json_loads(toload) if toload else {}
 
 

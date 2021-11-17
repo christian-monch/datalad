@@ -235,7 +235,7 @@ class ThreadedRunner:
             return code can be read from the attribute `return_code` of
             the generator.
 
-        popen_kwargs : dict
+        popen_kwargs : dict, optional
             Passed to `subprocess.Popen`, will typically be parameters
             supported by `subprocess.Popen`. Note that `bufsize`, `stdin`,
             `stdout`, `stderr`, and `shell` will be overwritten internally.
