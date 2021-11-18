@@ -59,6 +59,7 @@ class _ResultGenerator(Generator):
         process_running = 0
         process_exited = 1
         connection_lost = 2
+        waiting_for_process = 3
 
     def __init__(self,
                  runner: "ThreadedRunner",
@@ -70,6 +71,7 @@ class _ResultGenerator(Generator):
         self.result_queue = result_queue
         self.return_code = None
         self.state = self.GeneratorState.process_running
+        self.all_closed = False
 
     def _check_result(self):
         if self.runner.exception_on_error is True:
@@ -88,30 +90,32 @@ class _ResultGenerator(Generator):
             # If the result queue is empty and no more process interaction
             # files are monitored, progress to next state
             if len(self.result_queue) == 0 and not runner.active_file_numbers:
-                runner.close_process_stdin_stdout_stderr()
-                while runner.wait_for_process():
-                    pass
-
-                self.return_code = runner.process.poll()
-                runner.protocol.process_exited()
-                self.state = self.GeneratorState.process_exited
-                self._check_result()
+                self.state = self.GeneratorState.waiting_for_process
             else:
                 # If we have no results in the queue, but still monitored
-                # file numbers, wait on the threaded runner queue.
-                while len(self.result_queue) == 0 and runner.active_file_numbers:
+                # file numbers or elements in the output queue, wait on
+                # the threaded runner queue.
+                while len(self.result_queue) == 0 \
+                        and (runner.active_file_numbers
+                             or runner.output_queue.empty() is False):
                     runner.process_queue()
                 if len(self.result_queue) > 0:
                     return self.result_queue.popleft()
                 else:
-                    runner.close_process_stdin_stdout_stderr()
-                    while runner.wait_for_process():
-                        pass
+                    self.state = self.GeneratorState.waiting_for_process
 
-                    self.return_code = runner.process.poll()
-                    runner.protocol.process_exited()
-                    self.state = self.GeneratorState.process_exited
-                    self._check_result()
+        if self.state == self.GeneratorState.waiting_for_process:
+            if len(self.result_queue) > 0:
+                return self.result_queue.popleft()
+
+            while runner.wait_for_process():
+                if len(self.result_queue) > 0:
+                    return self.result_queue.popleft()
+
+            self.return_code = runner.process.poll()
+            runner.protocol.process_exited()
+            self.state = self.GeneratorState.process_exited
+            self._check_result()
 
         if self.state == self.GeneratorState.process_exited:
             if len(self.result_queue) > 0:
@@ -265,6 +269,7 @@ class ThreadedRunner:
         self.process_running = False
         self.fileno_mapping = None
         self.fileno_to_file = None
+        self.file_to_fileno = None
         self.output_queue = None
         self.active_file_numbers = None
 
@@ -366,6 +371,15 @@ class ThreadedRunner:
             self.process_stdin_fileno: self.process.stdin
         }
 
+        self.file_to_fileno = {
+            f: f.fileno()
+            for f in (
+                self.process.stdout,
+                self.process.stderr,
+                self.process.stdin
+            ) if f is not None
+        }
+
         self.active_file_numbers = set()
         self.output_queue = Queue()
 
@@ -429,7 +443,7 @@ class ThreadedRunner:
         # Process internal messages until no more active file descriptors
         # are present. This works because active file numbers are only
         # removed when an EOF is received in `self.process_queue`.
-        while self.active_file_numbers:
+        while self.active_file_numbers or self.output_queue.empty() is False:
             self.process_queue()
 
         # Close communication channels to subprocess (if they were
@@ -502,7 +516,8 @@ class ThreadedRunner:
                 self.protocol.pipe_connection_lost(
                     self.fileno_mapping[file_number],
                     None)
-                self.active_file_numbers.remove(file_number)
+                if file_number in self.active_file_numbers:
+                    self.active_file_numbers.remove(file_number)
                 _try_close(self.fileno_to_file[file_number])
             else:
                 # Call the protocol handler for data
@@ -510,6 +525,14 @@ class ThreadedRunner:
                 self.protocol.pipe_data_received(
                     self.fileno_mapping[file_number],
                     data)
+
+    def drain_queue(self):
+        """
+        Process until the queue is empty. This only yields reliable results
+        if the threads are not writing to the queue anymore
+        """
+        while not self.output_queue.empty():
+            self.process_queue()
 
     def check_process_state(self):
         """
@@ -527,9 +550,20 @@ class ThreadedRunner:
 
     def close_process_stdin_stdout_stderr(self):
         self.close_process_stdin()
+        self.close_process_stdout_stderr()
+
+    def close_process_stdout_stderr(self):
+        """
+        Close stdout and stderr of the process. The file descriptors are
+        immediately closed and removed from the set of monitored descriptors.
+        """
         for file_object in (self.process.stdout,
                             self.process.stderr):
             if file_object is not None:
+                file_number = self.file_to_fileno.get(file_object, None)
+                if file_number is not None:
+                    if file_number in self.active_file_numbers:
+                        self.active_file_numbers.remove(file_number)
                 _try_close(file_object)
 
     def close_process_stdin(self):
@@ -571,7 +605,7 @@ class ThreadedRunner:
                        self.stdin_timeout_thread):
             if thread is not None:
                 thread.request_exit()
-                thread.join()
+                #thread.join()
 
 
 def run_command(cmd: Union[str, List],

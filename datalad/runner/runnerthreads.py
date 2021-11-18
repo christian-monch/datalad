@@ -264,6 +264,8 @@ class WriteThread(TransportThread):
                     data[written:])
                 if self.timeout_thread:
                     self.timeout_thread.reset()
+                if self.exit_requested:
+                    return written == len(data)
         except (BrokenPipeError, OSError, ValueError):
             # The destination was most likely closed, nevertheless,
             # try to close it and indicate EOF.
