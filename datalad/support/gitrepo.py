@@ -2978,27 +2978,19 @@ class GitRepo(CoreGitRepo):
         if not eval_file_type:
             _get_link_target = None
         elif ref:
-
-            class ReadSymlinkTargetFromCatFile:
-                def __init__(self):
-                    self.line_number = 0
-
-                def __call__(self, line: str):
-                    if self.line_number == 0:
-                        if line.rstrip().endswith('missing'):
-                            # something we do not know about, should not happen
-                            # in real use, but guard against to avoid stalling
-                            return None
-                        self.line_number = 1
-                        return None
-                    else:
-                        self.line_number = 0
-                        return line.rstrip()
+            def _read_symlink_target_from_catfile(lines):
+                # it is always the second line, all checks done upfront
+                header = lines.readline()
+                if header.rstrip().endswith('missing'):
+                    # something we do not know about, should not happen
+                    # in real use, but guard against to avoid stalling
+                    return ''
+                return lines.readline().rstrip()
 
             _get_link_target = BatchedCommand(
                 ['git', 'cat-file', '--batch'],
                 path=self.path,
-                output_proc=ReadSymlinkTargetFromCatFile(),
+                output_proc=_read_symlink_target_from_catfile,
             )
         else:
             def try_readlink(path):

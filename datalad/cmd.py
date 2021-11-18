@@ -18,9 +18,11 @@ import subprocess
 import sys
 import tempfile
 import warnings
+from collections import deque
 from typing import (
     Any,
     Callable,
+    Generator,
     List,
     Optional,
     Tuple,
@@ -80,16 +82,16 @@ _TEMP_std = sys.stdout, sys.stderr
 _MAGICAL_OUTPUT_MARKER = "_runneroutput_"
 
 
-def readline_rstripped(line: str):
+def readline_rstripped(stdout):
     warnings.warn("the function `readline_rstripped()` is deprecated "
                   "and will be removed in a future release",
                   DeprecationWarning)
-    return _readline_rstripped(line)
+    return _readline_rstripped(stdout)
 
 
-def _readline_rstripped(line):
+def _readline_rstripped(stdout):
     """Internal helper for BatchedCommand"""
-    return line.rstrip()
+    return stdout.readline().rstrip()
 
 
 class BatchedCommandProtocol(GeneratorMixIn, StdOutErrCapture):
@@ -103,20 +105,12 @@ class BatchedCommandProtocol(GeneratorMixIn, StdOutErrCapture):
         self.output_proc = output_proc
         self.line_splitter = LineSplitter()
 
-    def _process_line(self, fd: int, line: str):
-        if self.output_proc:
-            result = self.output_proc(line)
-            if result is not None:
-                self.send_result((fd, result))
-        else:
-            self.send_result((fd, line.rstrip()))
-
     def pipe_data_received(self, fd: int, data: bytes):
         if fd == STDERR_FILENO:
             self.send_result((fd, data))
         elif fd == STDOUT_FILENO:
             for line in self.line_splitter.process(data.decode(self.encoding)):
-                self._process_line(fd, line)
+                self.send_result((fd, line))
         else:
             raise ValueError(f"unknown file descriptor: {fd}")
 
@@ -125,7 +119,26 @@ class BatchedCommandProtocol(GeneratorMixIn, StdOutErrCapture):
             remaining_line = self.line_splitter.finish_processing()
             if remaining_line is not None:
                 lgr.warning(f"unterminated line: {remaining_line}")
-                self._process_line(fd, remaining_line)
+                self.send_result((fd, remaining_line))
+
+
+class ReadlineEmulator:
+    """
+    This class implements readline() on the basis of an instance of
+    BatchedCommand. Its purpose is to emulate stdout for output_procs,
+    This allows us to provide a BatchedCommand API that is identical
+    to the old version, that is not based on the threaded runner.
+    """
+    def __init__(self,
+                 batched_command: "BatchedCommand"):
+        self.batched_command = batched_command
+
+    def readline(self):
+        """
+        Read from the stdout provider until we have a line or None (which
+        indicates some error).
+        """
+        return self.batched_command.get_one_line()
 
 
 class SafeDelCloseMixin(object):
@@ -213,6 +226,13 @@ class BatchedCommand(SafeDelCloseMixin):
     def __call__(self,
                  cmds: Union[str, Tuple, List]):
         """
+        Send commands to the subprocess and return the results. We expect one
+        result per command, how the result is structured is determined by
+        the output_proc. If output_proc returns not-None, the output is
+        considered to be a result.
+
+        If the subprocess does not exist yet or exited earlier, it is
+        started.
 
         Parameters
         ----------
@@ -244,18 +264,16 @@ class BatchedCommand(SafeDelCloseMixin):
                     instruction = ' '.join(instruction)
                 self.stdin_queue.put((instruction + "\n").encode())
 
-                # Get the response from the generator. The protocol is
-                # responsible for sending a response on stdout
-                # (and not blocking us)
-                while True:
-                    source, data = self.generator.send(None)
-                    if source == STDERR_FILENO:
-                        self.stderr_output += data
-                    elif source == STDOUT_FILENO:
-                        output.append(data)
-                        break
-                    else:
-                        raise ValueError(f"{self}: unknown source: {source}")
+                # Get the response from the generator. We only consider
+                # data received on stdout as a response.
+                if self.output_proc:
+                    # If we have an output procedure, let the output procedure
+                    # decide about the nature of the response
+                    result = self.output_proc(ReadlineEmulator(self))
+                else:
+                    result = self.get_one_line().rstrip()
+
+                output.append(result)
 
         except CommandError as command_error:
             lgr.error(f"{self}: command error: {command_error}")
@@ -266,6 +284,30 @@ class BatchedCommand(SafeDelCloseMixin):
 
         return output if input_multiple else output[0] if output else None
 
+    def proc1(self,
+              single_command: str):
+        """
+        Simulate the old interface. This method is used only once in
+        AnnexRepo.get_metadata()
+        """
+        assert isinstance(single_command, str)
+        return self(single_command)
+
+    def get_one_line(self):
+        """
+        Get a single line from the generator. We known that
+        BatchedCommandProtocol only returns complete lines on
+        stdout.
+        """
+        while True:
+            source, data = self.generator.send(None)
+            if source == STDERR_FILENO:
+                self.stderr_output += data
+            elif source == STDOUT_FILENO:
+                return data
+            else:
+                raise ValueError(f"{self}: unknown source: {source}")
+
     def close(self, return_stderr=False):
         """
         Close communication and wait for process to terminate
@@ -273,8 +315,7 @@ class BatchedCommand(SafeDelCloseMixin):
         Returns
         -------
         str, optional
-          stderr output if return_stderr and stderr file was there.
-          None otherwise
+          stderr output if return_stderr is True, None otherwise
         """
 
         if self.runner:
