@@ -121,6 +121,10 @@ class BatchedCommandProtocol(GeneratorMixIn, StdOutErrCapture):
                 lgr.warning(f"unterminated line: {remaining_line}")
                 self.send_result((fd, remaining_line))
 
+    def timeout(self, fd: Optional[int]) -> bool:
+        self.send_result(("timeout", fd))
+        return False
+
 
 class ReadlineEmulator:
     """
@@ -178,6 +182,7 @@ class BatchedCommand(SafeDelCloseMixin):
         self.runner = None
         self.generator = None
         self.encoding = None
+        self.wait_timed_out = None
 
     def _initialize(self):
 
@@ -197,6 +202,7 @@ class BatchedCommand(SafeDelCloseMixin):
             stdin=self.stdin_queue,
             cwd=self.path,
             env=GitRunnerBase.get_git_environ_adjusted(),
+            timeout=3.0,      # timeout value from old version
             output_proc=self.output_proc,
         )
         self.encoding = self.generator.runner.protocol.encoding
@@ -215,7 +221,7 @@ class BatchedCommand(SafeDelCloseMixin):
         ret = True
         ret_stderr = None
         if process and process.poll():
-            lgr.warning("Process %s was terminated with returncode %s" % (process, process.returncode))
+            lgr.warning("Process %s was terminated with return code %s" % (process, process.returncode))
             ret_stderr = self.close(return_stderr=True)
             ret = False
         if self._process is None and restart:
@@ -228,11 +234,13 @@ class BatchedCommand(SafeDelCloseMixin):
         """
         Send commands to the subprocess and return the results. We expect one
         result per command, how the result is structured is determined by
-        the output_proc. If output_proc returns not-None, the output is
+        output_proc. If output_proc returns not-None, the output is
         considered to be a result.
 
-        If the subprocess does not exist yet or exited earlier, it is
-        started.
+        If the subprocess does not exist yet it is started before the first
+        command is sent.
+
+        TODO: If the subprocess exits between commands, it is restarted.
 
         Parameters
         ----------
@@ -295,9 +303,10 @@ class BatchedCommand(SafeDelCloseMixin):
 
     def get_one_line(self):
         """
-        Get a single line from the generator. We known that
+        Get a single stdout line from the generator. We known that
         BatchedCommandProtocol only returns complete lines on
-        stdout.
+        stdout. Stderr is handled transparently within this method,
+        by adding all stderr-content to an internal buffer.
         """
         while True:
             source, data = self.generator.send(None)
@@ -319,21 +328,44 @@ class BatchedCommand(SafeDelCloseMixin):
         """
 
         if self.runner:
-
-            # Request closing of stdin by enqueueing None
-            self.stdin_queue.put(None)
+            # Close stdin to let the process know that we want to end
+            # communication. We also close stdout and stderr to inform
+            # the generator that we do not care about them anymore, because
+            # otherwise the generator would wait for output from them.
+            # (The threads would create timeouts, but at this point
+            # returning them in the generator does not work (TODO: why?)
+            self.generator.runner.close_process_stdin_stdout_stderr()
 
             # Process all remaining messages until the subprocess exits.
             remaining = []
+            timeout = False
             try:
-                remaining.extend(self.generator)
+                for source, data in self.generator:
+                    if source == STDERR_FILENO:
+                        self.stderr_output += data
+                    elif source == STDOUT_FILENO:
+                        remaining.append(data)
+                    elif source == "timeout":
+                        timeout = True
+                        break
+                    else:
+                        raise ValueError(f"{self}: unknown source: {source}")
+
             except CommandError as command_error:
                 lgr.error(f"{self} subprocess failed with {command_error}")
+
             if remaining:
                 lgr.warning(f"{self}: remaining content: {remaining}")
-            self.runner = None
 
-        return self.get_requested_error_output(return_stderr)
+            self.wait_timed_out = timeout is True
+            if self.wait_timed_out:
+                lgr.debug(
+                    f"{self}: timeout while waiting for subprocess to exit")
+
+        result = self.get_requested_error_output(return_stderr)
+        self.runner = None
+        self.stderr_output = b""
+        return result
 
     def get_requested_error_output(self, return_stderr: bool):
         if not self.runner:
