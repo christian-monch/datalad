@@ -102,31 +102,30 @@ class BatchedCommandProtocol(GeneratorMixIn, StdOutErrCapture):
         StdOutErrCapture.__init__(self, done_future, encoding)
         self.output_proc = output_proc
         self.line_splitter = LineSplitter()
-        self.stderr_content = b""
 
-    def _process_line(self, line: str):
+    def _process_line(self, fd: int, line: str):
         if self.output_proc:
             result = self.output_proc(line)
             if result is not None:
-                self.send_result(result)
+                self.send_result((fd, result))
         else:
-            self.send_result(line.rstrip())
+            self.send_result((fd, line.rstrip()))
 
     def pipe_data_received(self, fd: int, data: bytes):
         if fd == STDERR_FILENO:
-            self.stderr_content += data
+            self.send_result((fd, data))
         elif fd == STDOUT_FILENO:
-
             for line in self.line_splitter.process(data.decode(self.encoding)):
-                self._process_line(line)
+                self._process_line(fd, line)
         else:
             raise ValueError(f"unknown file descriptor: {fd}")
 
     def pipe_connection_lost(self, fd: int, exc: Optional[Exception]):
-        remaining_line = self.line_splitter.finish_processing()
-        if remaining_line is not None:
-            lgr.warning(f"unterminated line: {remaining_line}")
-            self._process_line(remaining_line)
+        if fd == STDOUT_FILENO:
+            remaining_line = self.line_splitter.finish_processing()
+            if remaining_line is not None:
+                lgr.warning(f"unterminated line: {remaining_line}")
+                self._process_line(fd, remaining_line)
 
 
 class SafeDelCloseMixin(object):
@@ -146,7 +145,9 @@ class SafeDelCloseMixin(object):
 
 @auto_repr
 class BatchedCommand(SafeDelCloseMixin):
-    """Container for a process which would allow for persistent communication
+    """
+    Container for a running subprocess. Supports communication with the
+    subprocess via stdin and stdout.
     """
 
     def __init__(self,
@@ -155,12 +156,12 @@ class BatchedCommand(SafeDelCloseMixin):
                  output_proc: Callable = None
                  ):
 
-        if not isinstance(cmd, List):
-            cmd = [cmd]
-        self.cmd = cmd
+        command = cmd
+        self.command = [command] if not isinstance(command, List) else command
         self.path = path
         self.output_proc = output_proc
         self.stdin_queue = None
+        self.stderr_output = b""
         self.runner = None
         self.generator = None
         self.encoding = None
@@ -168,7 +169,7 @@ class BatchedCommand(SafeDelCloseMixin):
     def _initialize(self):
 
         lgr.debug("Starting new runner for %s", repr(self))
-        lgr.log(5, "Command: %s", self.cmd)
+        lgr.log(5, "Command: %s", self.command)
 
         self.stdin_queue = queue.Queue()
         self.runner = WitlessRunner(
@@ -176,7 +177,7 @@ class BatchedCommand(SafeDelCloseMixin):
             env=GitRunnerBase.get_git_environ_adjusted()
         )
         self.generator = self.runner.run(
-            cmd=self.cmd,
+            cmd=self.command,
             protocol=BatchedCommandProtocol,
             stdin=self.stdin_queue,
             cwd=self.path,
@@ -214,30 +215,53 @@ class BatchedCommand(SafeDelCloseMixin):
         Parameters
         ----------
         cmds : str or tuple or list of (str or tuple)
+            instructions for the subprocess
 
         Returns
         -------
         str or list
           Output received from process.  list in case if cmds was a list
         """
+        instructions = cmds
         if not self.runner:
             self._initialize()
 
-        input_multiple = isinstance(cmds, list)
+        input_multiple = isinstance(instructions, list)
         if not input_multiple:
-            cmds = [cmds]
+            instructions = [instructions]
 
         output = []
         try:
-            for entry in cmds:
-                if not isinstance(entry, str):
-                    entry = ' '.join(entry)
-                self.stdin_queue.put((entry + "\n").encode())
-                output.append(self.generator.send(None))
+            # This code assumes that each processing instruction is
+            # a single line and leads to a response that triggers a
+            # `send_result` in the protocol.
+            for instruction in instructions:
+
+                # Send instruction to subprocess
+                if not isinstance(instruction, str):
+                    instruction = ' '.join(instruction)
+                self.stdin_queue.put((instruction + "\n").encode())
+
+                # Get the response from the generator. The protocol is
+                # responsible for sending a response on stdout
+                # (and not blocking us)
+                while True:
+                    source, data = self.generator.send(None)
+                    if source == STDERR_FILENO:
+                        self.stderr_output += data
+                    elif source == STDOUT_FILENO:
+                        output.append(data)
+                        break
+                    else:
+                        raise ValueError(f"{self}: unknown source: {source}")
+
         except CommandError as command_error:
-            print(f"command error: {command_error}")
+            lgr.error(f"{self}: command error: {command_error}")
+            self.runner = None
+
         except StopIteration:
-            pass
+            self.runner = None
+
         return output if input_multiple else output[0] if output else None
 
     def close(self, return_stderr=False):
@@ -257,22 +281,26 @@ class BatchedCommand(SafeDelCloseMixin):
             self.stdin_queue.put(None)
 
             # Process all remaining messages until the subprocess exits.
+            remaining = []
             try:
-                tuple(self.generator)
+                remaining.extend(self.generator)
             except CommandError as command_error:
                 lgr.error(f"{self} subprocess failed with {command_error}")
+            if remaining:
+                lgr.warning(f"{self}: remaining content: {remaining}")
             self.runner = None
+
         return self.get_requested_error_output(return_stderr)
 
     def get_requested_error_output(self, return_stderr: bool):
         if not self.runner:
             return None
 
-        stderr = ensure_unicode(self.generator.runner.protocol.stderr_content)
+        stderr_content = ensure_unicode(self.stderr_output)
         if lgr.isEnabledFor(5):
             from . import cfg
             if cfg.getbool('datalad.log', 'outputs', default=False):
-                stderr_lines = stderr.splitlines()
+                stderr_lines = stderr_content.splitlines()
                 lgr.log(
                     5,
                     "stderr of %s had %d lines:",
@@ -281,7 +309,7 @@ class BatchedCommand(SafeDelCloseMixin):
                 for line in stderr_lines:
                     lgr.log(5, "| " + line)
         if return_stderr:
-            return stderr
+            return stderr_content
         return None
 
         ret = None
