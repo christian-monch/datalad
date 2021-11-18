@@ -7,22 +7,20 @@
 #
 # ## ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
 """
-Wrapper for command and function calls, allowing for dry runs and output handling
+Class the starts a subprocess and keeps it around to communicate with it
+via stdin. For each instruction send over stdin, a response is read and
+returned. The response structure is determined by "output_proc"
 
 """
 
 import logging
 import os
 import queue
-import subprocess
 import sys
-import tempfile
 import warnings
-from collections import deque
 from typing import (
     Any,
     Callable,
-    Generator,
     List,
     Optional,
     Tuple,
@@ -52,7 +50,6 @@ from datalad.support.exceptions import CommandError
 from datalad.runner.coreprotocols import StdOutErrCapture
 from datalad.runner.nonasyncrunner import (
     STDERR_FILENO,
-    STDIN_FILENO,
     STDOUT_FILENO,
 )
 from datalad.runner.protocol import GeneratorMixIn
@@ -61,8 +58,6 @@ from datalad.runner.utils import LineSplitter
 from datalad.utils import (
     auto_repr,
     ensure_unicode,
-    try_multiple,
-    unlink,
 )
 
 
@@ -129,9 +124,10 @@ class BatchedCommandProtocol(GeneratorMixIn, StdOutErrCapture):
 class ReadlineEmulator:
     """
     This class implements readline() on the basis of an instance of
-    BatchedCommand. Its purpose is to emulate stdout for output_procs,
+    BatchedCommand. Its purpose is to emulate stdout's for output_procs,
     This allows us to provide a BatchedCommand API that is identical
-    to the old version, that is not based on the threaded runner.
+    to the old version, but with an implementation that is based on the
+    threaded runner.
     """
     def __init__(self,
                  batched_command: "BatchedCommand"):
@@ -202,32 +198,10 @@ class BatchedCommand(SafeDelCloseMixin):
             stdin=self.stdin_queue,
             cwd=self.path,
             env=GitRunnerBase.get_git_environ_adjusted(),
-            timeout=3.0,      # timeout value from old version
+            timeout=11.0,
             output_proc=self.output_proc,
         )
         self.encoding = self.generator.runner.protocol.encoding
-
-    def _check_process(self, restart=False):
-        """Check if the process was terminated and restart if restart
-
-        Returns
-        -------
-        bool
-          True if process was alive.
-        str
-          stderr if any recorded if was terminated
-        """
-        process = self._process
-        ret = True
-        ret_stderr = None
-        if process and process.poll():
-            lgr.warning("Process %s was terminated with return code %s" % (process, process.returncode))
-            ret_stderr = self.close(return_stderr=True)
-            ret = False
-        if self._process is None and restart:
-            lgr.warning("Restarting the process due to previous failure")
-            self._initialize()
-        return ret, ret_stderr
 
     def __call__(self,
                  cmds: Union[str, Tuple, List]):
@@ -250,7 +224,8 @@ class BatchedCommand(SafeDelCloseMixin):
         Returns
         -------
         str or list
-          Output received from process.  list in case if cmds was a list
+            Output received from process. Either a string, or a list of strings,
+            if cmds was a list.
         """
         instructions = cmds
         if not self.runner:
@@ -305,8 +280,10 @@ class BatchedCommand(SafeDelCloseMixin):
         """
         Get a single stdout line from the generator. We known that
         BatchedCommandProtocol only returns complete lines on
-        stdout. Stderr is handled transparently within this method,
-        by adding all stderr-content to an internal buffer.
+        stdout.
+
+        (Stderr is handled transparently within this method,
+        by adding all stderr-content to an internal buffer.)
         """
         while True:
             source, data = self.generator.send(None)
@@ -319,7 +296,22 @@ class BatchedCommand(SafeDelCloseMixin):
 
     def close(self, return_stderr=False):
         """
-        Close communication and wait for process to terminate
+        Close communication and wait for process to terminate. If the "timeout"
+        parameter to the constructor was not None, and if the configuration
+        setting "datalad.runtime.stalled-external" is set to "abandon",
+        the method will return latest after "timeout" seconds. If the subprocess
+        did not exit within this time, the attribute "wait_timed_out" will
+        be set to "True".
+
+        TODO: shall we raise a TimeoutException if wait times out?
+
+        Parameters
+        ----------
+        return_stderr: bool
+          if set to "True", the call will return all collected stderr content
+          as string. In addition, if return_stderr is True and the log level
+          is 5 or lower, and the configuration setting "datalad.log.outputs"
+          evaluates to "True", the content of stderr will be logged.
 
         Returns
         -------
@@ -328,6 +320,14 @@ class BatchedCommand(SafeDelCloseMixin):
         """
 
         if self.runner:
+
+            from . import cfg
+            cfg_var = "datalad.runtime.stalled-external"
+            cfg_val = cfg.obtain(cfg_var)
+            if cfg_val not in ("wait", "abandon"):
+                raise ValueError(f"Unexpected value: {cfg_var}={cfg_val!r}")
+            abandon = cfg_val == "abandon"
+
             # Close stdin to let the process know that we want to end
             # communication. We also close stdout and stderr to inform
             # the generator that we do not care about them anymore, because
@@ -346,8 +346,9 @@ class BatchedCommand(SafeDelCloseMixin):
                     elif source == STDOUT_FILENO:
                         remaining.append(data)
                     elif source == "timeout":
-                        timeout = True
-                        break
+                        if abandon is True:
+                            timeout = True
+                            break
                     else:
                         raise ValueError(f"{self}: unknown source: {source}")
 
@@ -361,6 +362,9 @@ class BatchedCommand(SafeDelCloseMixin):
             if self.wait_timed_out:
                 lgr.debug(
                     f"{self}: timeout while waiting for subprocess to exit")
+                lgr.warning(
+                    f"Batched process {self} did not finish, "
+                    f"abandoning it without killing it")
 
         result = self.get_requested_error_output(return_stderr)
         self.runner = None
@@ -374,7 +378,7 @@ class BatchedCommand(SafeDelCloseMixin):
         stderr_content = ensure_unicode(self.stderr_output)
         if lgr.isEnabledFor(5):
             from . import cfg
-            if cfg.getbool('datalad.log', 'outputs', default=False):
+            if cfg.getbool("datalad.log", "outputs", default=False):
                 stderr_lines = stderr_content.splitlines()
                 lgr.log(
                     5,
@@ -386,45 +390,3 @@ class BatchedCommand(SafeDelCloseMixin):
         if return_stderr:
             return stderr_content
         return None
-
-        ret = None
-        process = self._process
-        if self._stderr_out:
-            # close possibly still open fd
-            lgr.debug(
-                "Closing stderr of %s", process)
-            os.fdopen(self._stderr_out).close()
-            self._stderr_out = None
-        if process:
-            lgr.debug(
-                "Closing stdin of %s and waiting process to finish", process)
-            process.stdin.close()
-            process.stdout.close()
-            from . import cfg
-            cfg_var = 'datalad.runtime.stalled-external'
-            cfg_val = cfg.obtain(cfg_var)
-            if cfg_val == 'wait':
-                process.wait()
-            elif cfg_val == 'abandon':
-                # try waiting for the annex process to finish 3 times for 3 sec
-                # with 1s pause in between
-                try:
-                    try_multiple(
-                        # ntrials
-                        3,
-                        # exception to catch
-                        subprocess.TimeoutExpired,
-                        # base waiting period
-                        1.0,
-                        # function to run
-                        process.wait,
-                        timeout=3.0,
-                    )
-                except subprocess.TimeoutExpired:
-                    lgr.warning(
-                        "Batched process %s did not finish, abandoning it without killing it",
-                        process)
-            else:
-                raise ValueError(f"Unexpected {cfg_var}={cfg_val!r}")
-            self._process = None
-            lgr.debug("Process %s has finished", process)
