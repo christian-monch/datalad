@@ -172,6 +172,8 @@ class BatchedCommand(SafeDelCloseMixin):
         lgr.log(5, "Command: %s", self.command)
 
         self.stdin_queue = queue.Queue()
+        self.stderr_output = b""
+
         self.runner = WitlessRunner(
             cwd=self.path,
             env=GitRunnerBase.get_git_environ_adjusted()
