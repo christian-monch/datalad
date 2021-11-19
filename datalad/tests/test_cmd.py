@@ -76,7 +76,8 @@ def test_batched_close_wait():
 
 def test_batched_close_ok():
     # Expect a long wait and no timeout if the process runs longer than timeout
-    # and the config for "datalad.runtime.stalled-external" has its default value.
+    # seconds and the config for "datalad.runtime.stalled-external" has its
+    # default value.
     bc = BatchedCommand(
         cmd=[sys.executable, "-i", "-u", "-q", "-"],
         timeout=2)
