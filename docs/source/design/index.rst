@@ -22,3 +22,4 @@ subsystems in DataLad.
    credentials
    url_substitution
    threaded_runner
+   batched_command
