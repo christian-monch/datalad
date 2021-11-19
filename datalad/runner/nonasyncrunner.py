@@ -141,7 +141,7 @@ class _ResultGenerator(Generator):
         return self.runner.process.poll()
 
     def would_wait(self):
-        return self.runner.output_queue.emtpy()
+        return self.runner.output_queue.empty()
 
     def terminate_process(self,
                   waiting_time=None):
