@@ -28,7 +28,7 @@ Remark: In principle any output processing could be performed. But, if the outpu
 
 When ``BatchedCommand.close()`` is called, stdin, stdout, and stderr of the subprocess are closed. This indicates the end of processing to the subprocess. Generally the subprocess is expected to exit shortly after that. ``BatchedCommand.close()`` will wait for the subprocess to end, if the configuration ``datalad.runtime.stalled-external`` is set to ``"wait"``. If the configuration ``datalad.runtime.stalled-external`` is set to ``"abandon"``, ``BatchedCommand.close()`` will return after "timeout" seconds if ``timeout`` was provided to ``BatchedCommand.__init__()``, otherwise it will return after 11 seconds. If a timeout occurred, the attribute ``wait_timed_out`` of the ``BatchedCommand`` instance will be set to ``True``. If ``exception_on_timeout=True`` is provided to ``BatchedCommand.__init__()``, a ``subprocess.TimeoutExpired`` exception will be raised on a timeout while waiting for the process. It is not safe to reused a ``BatchedCommand`` instance after such an exception was risen.
 
-Stderr of the subprocess is gathered in a byte-string. Its content will be returnd by ``BatchCommand.close()`` if the parameter ``return_stderr`` is ``True``.
+Stderr of the subprocess is gathered in a byte-string. Its content will be returned by ``BatchCommand.close()`` if the parameter ``return_stderr`` is ``True``.
 
 
 Implementation details
