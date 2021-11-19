@@ -225,10 +225,13 @@ class BatchedCommand(SafeDelCloseMixin):
     def __call__(self,
                  cmds: Union[str, Tuple, List]):
         """
-        Send commands to the subprocess and return the results. We expect one
-        result per command, how the result is structured is determined by
-        output_proc. If output_proc returns not-None, the output is
-        considered to be a result.
+        Send requests to the subprocess and return the responses. We expect one
+        response per request. How the response is structured is determined by
+        output_proc. If output_proc returns not-None, the responses is
+        considered to be a response.
+
+        If output_proc is not provided, we assume that a single response is
+        a single line.
 
         If the subprocess does not exist yet it is started before the first
         command is sent.
@@ -238,55 +241,61 @@ class BatchedCommand(SafeDelCloseMixin):
         Parameters
         ----------
         cmds : str or tuple or list of (str or tuple)
-            instructions for the subprocess
+            request for the subprocess
 
         Returns
         -------
         str or list
-            Output received from process. Either a string, or a list of strings,
-            if cmds was a list.
+            Responses received from process. Either a string, or a list of
+            strings, if cmds was a list.
         """
-        instructions = cmds
+        requests = cmds
         if not self.runner:
             self._initialize()
 
-        input_multiple = isinstance(instructions, list)
+        input_multiple = isinstance(requests, list)
         if not input_multiple:
-            instructions = [instructions]
+            requests = [requests]
 
-        output = []
+        responses = []
         try:
-            # This code assumes that each processing instruction is
+            # This code assumes that each processing request is
             # a single line and leads to a response that triggers a
             # `send_result` in the protocol.
-            for instruction in instructions:
+            for request in requests:
 
-                # Send instruction to subprocess
-                if not isinstance(instruction, str):
-                    instruction = ' '.join(instruction)
-                self.stdin_queue.put((instruction + "\n").encode())
+                # Send request to subprocess
+                if not isinstance(request, str):
+                    request = ' '.join(request)
+                self.stdin_queue.put((request + "\n").encode())
 
                 # Get the response from the generator. We only consider
                 # data received on stdout as a response.
                 if self.output_proc:
                     # If we have an output procedure, let the output procedure
-                    # decide about the nature of the response
-                    result = self.output_proc(ReadlineEmulator(self))
+                    # read stdout and decide about the nature of the response
+                    response = self.output_proc(ReadlineEmulator(self))
                 else:
-                    result = self.get_one_line()
-                    if result is not None:
-                        result = result.rstrip()
+                    # If there is no output procedure we assume that a response
+                    # is one line.
+                    response = self.get_one_line()
+                    if response is not None:
+                        response = response.rstrip()
 
-                output.append(result)
+                responses.append(response)
 
         except CommandError as command_error:
+            # The command exited with a non-zero return code
             lgr.error(f"{self}: command error: {command_error}")
+            self.return_code = command_error.code
             self.runner = None
 
         except StopIteration:
+            # The command finished executing
+            self.return_code = self.generator.return_code
             self.runner = None
 
-        return output if input_multiple else output[0] if output else None
+        return responses if input_multiple else responses[0] if responses else None
 
     def proc1(self,
               single_command: str):
