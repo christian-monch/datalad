@@ -166,19 +166,22 @@ class BatchedCommand(SafeDelCloseMixin):
     def __init__(self,
                  cmd: Union[str, Tuple, List],
                  path: Optional[str] = None,
-                 output_proc: Callable = None
+                 output_proc: Callable = None,
+                 timeout: float = 11.0
                  ):
 
         command = cmd
         self.command = [command] if not isinstance(command, List) else command
         self.path = path
         self.output_proc = output_proc
+        self.timeout = timeout
         self.stdin_queue = None
         self.stderr_output = b""
         self.runner = None
         self.generator = None
         self.encoding = None
         self.wait_timed_out = None
+        self.return_code = None
 
     def _initialize(self):
 
@@ -187,6 +190,8 @@ class BatchedCommand(SafeDelCloseMixin):
 
         self.stdin_queue = queue.Queue()
         self.stderr_output = b""
+        self.wait_timed_out = None
+        self.return_code = None
 
         self.runner = WitlessRunner(
             cwd=self.path,
@@ -198,7 +203,7 @@ class BatchedCommand(SafeDelCloseMixin):
             stdin=self.stdin_queue,
             cwd=self.path,
             env=GitRunnerBase.get_git_environ_adjusted(),
-            timeout=11.0,
+            timeout=self.timeout,
             output_proc=self.output_proc,
         )
         self.encoding = self.generator.runner.protocol.encoding
@@ -351,9 +356,11 @@ class BatchedCommand(SafeDelCloseMixin):
                             break
                     else:
                         raise ValueError(f"{self}: unknown source: {source}")
+                self.return_code = self.generator.return_code
 
             except CommandError as command_error:
                 lgr.error(f"{self} subprocess failed with {command_error}")
+                self.return_code = command_error.code
 
             if remaining:
                 lgr.warning(f"{self}: remaining content: {remaining}")
@@ -363,8 +370,8 @@ class BatchedCommand(SafeDelCloseMixin):
                 lgr.debug(
                     f"{self}: timeout while waiting for subprocess to exit")
                 lgr.warning(
-                    f"Batched process {self} did not finish, "
-                    f"abandoning it without killing it")
+                    f"Batched process ({self.generator.runner.process.pid}) "
+                    f"did not finish, abandoning it without killing it")
 
         result = self.get_requested_error_output(return_stderr)
         self.runner = None

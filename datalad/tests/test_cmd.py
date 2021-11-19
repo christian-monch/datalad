@@ -10,9 +10,9 @@
 """
 import sys
 import unittest.mock
-
 from datalad.tests.utils import (
     assert_equal,
+    assert_is_none,
     assert_true,
 )
 
@@ -41,11 +41,49 @@ def test_batched_command():
     assert_equal(stderr.strip(), ">>> >>> >>>")
 
 
-def test_wait_timeout():
-    bc = BatchedCommand(cmd=[sys.executable, "-i", "-u", "-q", "-"])
+def test_batched_close_abandon():
+    # Expect a timeout if the process runs longer than timeout and the config
+    # for "datalad.runtime.stalled-external" is "abandon".
+    bc = BatchedCommand(
+        cmd=[sys.executable, "-i", "-u", "-q", "-"],
+        timeout=.5)
     # Send at least one instruction to start the subprocess
     response = bc("import time; print('a')")
     assert_equal(response, "a")
-    bc.stdin_queue.put("time.sleep(20)\n".encode())
+    bc.stdin_queue.put("time.sleep(2); exit(1)\n".encode())
+    with unittest.mock.patch("datalad.cfg") as cfg_mock:
+        cfg_mock.configure_mock(**{"obtain.return_value": "abandon"})
+        bc.close(return_stderr=False)
+        assert_true(bc.wait_timed_out is True)
+        assert_is_none(bc.return_code)
+
+
+def test_batched_close_wait():
+    # Expect a long wait and no timeout if the process runs longer than timeout
+    # and the config for "datalad.runtime.stalled-external" has its default
+    # value.
+    bc = BatchedCommand(
+        cmd=[sys.executable, "-i", "-u", "-q", "-"],
+        timeout=.5)
+    # Send at least one instruction to start the subprocess
+    response = bc("import time; print('a')")
+    assert_equal(response, "a")
+    bc.stdin_queue.put("time.sleep(2); exit(2)\n".encode())
     bc.close(return_stderr=False)
-    assert_true(bc.wait_timed_out is True)
+    assert_true(bc.wait_timed_out is False)
+    assert_equal(bc.return_code, 2)
+
+
+def test_batched_close_ok():
+    # Expect a long wait and no timeout if the process runs longer than timeout
+    # and the config for "datalad.runtime.stalled-external" has its default value.
+    bc = BatchedCommand(
+        cmd=[sys.executable, "-i", "-u", "-q", "-"],
+        timeout=2)
+    # Send at least one instruction to start the subprocess
+    response = bc("import time; print('a')")
+    assert_equal(response, "a")
+    bc.stdin_queue.put("time.sleep(.5); exit(3)\n".encode())
+    bc.close(return_stderr=False)
+    assert_true(bc.wait_timed_out is False)
+    assert_equal(bc.return_code, 3)
