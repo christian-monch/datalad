@@ -18,6 +18,7 @@ import os
 import queue
 import sys
 import warnings
+from subprocess import TimeoutExpired
 from typing import (
     Any,
     Callable,
@@ -91,12 +92,14 @@ def _readline_rstripped(stdout):
 
 class BatchedCommandProtocol(GeneratorMixIn, StdOutErrCapture):
     def __init__(self,
+                 batched_command: "BatchedCommand",
                  done_future: Any = None,
                  encoding: Optional[str] = None,
                  output_proc: Callable = None,
                  ):
         GeneratorMixIn.__init__(self)
         StdOutErrCapture.__init__(self, done_future, encoding)
+        self.batched_command = batched_command
         self.output_proc = output_proc
         self.line_splitter = LineSplitter()
 
@@ -117,6 +120,9 @@ class BatchedCommandProtocol(GeneratorMixIn, StdOutErrCapture):
                 self.send_result((fd, remaining_line))
 
     def timeout(self, fd: Optional[int]) -> bool:
+        timeout_error = self.batched_command.get_timeout_exception(fd)
+        if timeout_error:
+            raise timeout_error
         self.send_result(("timeout", fd))
         return False
 
@@ -167,7 +173,8 @@ class BatchedCommand(SafeDelCloseMixin):
                  cmd: Union[str, Tuple, List],
                  path: Optional[str] = None,
                  output_proc: Callable = None,
-                 timeout: float = 11.0
+                 timeout: Optional[float] = None,
+                 exception_on_timeout: bool = False,
                  ):
 
         command = cmd
@@ -175,6 +182,8 @@ class BatchedCommand(SafeDelCloseMixin):
         self.path = path
         self.output_proc = output_proc
         self.timeout = timeout
+        self.exception_on_timeout = exception_on_timeout
+
         self.stdin_queue = None
         self.stderr_output = b""
         self.runner = None
@@ -182,6 +191,7 @@ class BatchedCommand(SafeDelCloseMixin):
         self.encoding = None
         self.wait_timed_out = None
         self.return_code = None
+        self._abandon_cache = None
 
     def _initialize(self):
 
@@ -203,7 +213,11 @@ class BatchedCommand(SafeDelCloseMixin):
             stdin=self.stdin_queue,
             cwd=self.path,
             env=GitRunnerBase.get_git_environ_adjusted(),
-            timeout=self.timeout,
+            # This mimics the behavior of the old implementation w.r.t
+            # timeouts when waiting for the closing process
+            timeout=self.timeout or 11.0,
+            # Keyword arguments for the protocol
+            batched_command=self,
             output_proc=self.output_proc,
         )
         self.encoding = self.generator.runner.protocol.encoding
@@ -259,7 +273,9 @@ class BatchedCommand(SafeDelCloseMixin):
                     # decide about the nature of the response
                     result = self.output_proc(ReadlineEmulator(self))
                 else:
-                    result = self.get_one_line().rstrip()
+                    result = self.get_one_line()
+                    if result is not None:
+                        result = result.rstrip()
 
                 output.append(result)
 
@@ -281,21 +297,33 @@ class BatchedCommand(SafeDelCloseMixin):
         assert isinstance(single_command, str)
         return self(single_command)
 
-    def get_one_line(self):
+    def get_one_line(self) -> Optional[str]:
         """
-        Get a single stdout line from the generator. We known that
-        BatchedCommandProtocol only returns complete lines on
-        stdout.
+        Get a single stdout line from the generator.
 
-        (Stderr is handled transparently within this method,
-        by adding all stderr-content to an internal buffer.)
+        If timeout was specified, and exception_on_timeout is False,
+        and if a timeout occurs, return None. Otherwise return the
+        str that was read from the generator.
         """
+
+        # Implementation remarks:
+        # 1. We known that BatchedCommandProtocol only returns complete lines on
+        #    stdout, that makes this code simple.
+        # 2. stderr is handled transparently within this method,
+        #    by adding all stderr-content to an internal buffer.
         while True:
             source, data = self.generator.send(None)
             if source == STDERR_FILENO:
                 self.stderr_output += data
             elif source == STDOUT_FILENO:
                 return data
+            elif source == "timeout":
+                # TODO: we should restart the subprocess on timeout, otherwise
+                #  we might end up with results from a previous instruction,
+                #  when handling multiple instructions at once. Until this is
+                #  done properly, communication timeouts are ignored in order
+                #  to avoid errors.
+                pass
             else:
                 raise ValueError(f"{self}: unknown source: {source}")
 
@@ -307,8 +335,6 @@ class BatchedCommand(SafeDelCloseMixin):
         the method will return latest after "timeout" seconds. If the subprocess
         did not exit within this time, the attribute "wait_timed_out" will
         be set to "True".
-
-        TODO: shall we raise a TimeoutException if wait times out?
 
         Parameters
         ----------
@@ -326,12 +352,7 @@ class BatchedCommand(SafeDelCloseMixin):
 
         if self.runner:
 
-            from . import cfg
-            cfg_var = "datalad.runtime.stalled-external"
-            cfg_val = cfg.obtain(cfg_var)
-            if cfg_val not in ("wait", "abandon"):
-                raise ValueError(f"Unexpected value: {cfg_var}={cfg_val!r}")
-            abandon = cfg_val == "abandon"
+            abandon = self._get_abandon()
 
             # Close stdin to let the process know that we want to end
             # communication. We also close stdout and stderr to inform
@@ -351,7 +372,7 @@ class BatchedCommand(SafeDelCloseMixin):
                     elif source == STDOUT_FILENO:
                         remaining.append(data)
                     elif source == "timeout":
-                        if abandon is True:
+                        if data is None and abandon is True:
                             timeout = True
                             break
                     else:
@@ -397,3 +418,31 @@ class BatchedCommand(SafeDelCloseMixin):
         if return_stderr:
             return stderr_content
         return None
+
+    def get_timeout_exception(self,
+                              fd: Optional[int]
+                              ) -> Optional[TimeoutExpired]:
+        """
+        Get a process timeout exception if timeout exceptions should
+        be generated for a process that continues longer than timeout
+        seconds after self.close() was initiated.
+        """
+        if self.timeout is None \
+                or fd is not None \
+                or self.exception_on_timeout is False\
+                or self._get_abandon() == "wait":
+            return None
+        return TimeoutExpired(
+            cmd=self.command,
+            timeout=self.timeout or 11.0,
+            stderr=self.stderr_output)
+
+    def _get_abandon(self):
+        if self._abandon_cache is None:
+            from . import cfg
+            cfg_var = "datalad.runtime.stalled-external"
+            cfg_val = cfg.obtain(cfg_var)
+            if cfg_val not in ("wait", "abandon"):
+                raise ValueError(f"Unexpected value: {cfg_var}={cfg_val!r}")
+            self._abandon_cache = cfg_val == "abandon"
+        return self._abandon_cache
