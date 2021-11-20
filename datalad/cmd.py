@@ -17,11 +17,11 @@ import logging
 import os
 import queue
 import sys
-import warnings
 from subprocess import TimeoutExpired
 from typing import (
     Any,
     Callable,
+    Generator,
     List,
     Optional,
     Tuple,
@@ -56,6 +56,7 @@ from datalad.runner.nonasyncrunner import (
 from datalad.runner.protocol import GeneratorMixIn
 from datalad.runner.runner import WitlessRunner
 from datalad.runner.utils import LineSplitter
+from datalad.support.exceptions import CommandError
 from datalad.utils import (
     auto_repr,
     ensure_unicode,
@@ -76,18 +77,6 @@ _TEMP_std = sys.stdout, sys.stderr
 # in Runner so we take care about their removal, in contrast to those
 # which might be created outside and passed into Runner
 _MAGICAL_OUTPUT_MARKER = "_runneroutput_"
-
-
-def readline_rstripped(stdout):
-    warnings.warn("the function `readline_rstripped()` is deprecated "
-                  "and will be removed in a future release",
-                  DeprecationWarning)
-    return _readline_rstripped(stdout)
-
-
-def _readline_rstripped(stdout):
-    """Internal helper for BatchedCommand"""
-    return stdout.readline().rstrip()
 
 
 class BatchedCommandProtocol(GeneratorMixIn, StdOutErrCapture):
@@ -223,7 +212,8 @@ class BatchedCommand(SafeDelCloseMixin):
         self.encoding = self.generator.runner.protocol.encoding
 
     def __call__(self,
-                 cmds: Union[str, Tuple, List]):
+                 cmds: Union[str, Tuple, List]
+                 ) -> Generator:
         """
         Send requests to the subprocess and return the responses. We expect one
         response per request. How the response is structured is determined by
@@ -257,7 +247,6 @@ class BatchedCommand(SafeDelCloseMixin):
         if not input_multiple:
             requests = [requests]
 
-        responses = []
         try:
             # This code assumes that each processing request is
             # a single line and leads to a response that triggers a
@@ -282,7 +271,7 @@ class BatchedCommand(SafeDelCloseMixin):
                     if response is not None:
                         response = response.rstrip()
 
-                responses.append(response)
+                yield response
 
         except CommandError as command_error:
             # The command exited with a non-zero return code
@@ -295,7 +284,7 @@ class BatchedCommand(SafeDelCloseMixin):
             self.return_code = self.generator.return_code
             self.runner = None
 
-        return responses if input_multiple else responses[0] if responses else None
+        return
 
     def proc1(self,
               single_command: str):
