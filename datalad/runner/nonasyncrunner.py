@@ -92,12 +92,10 @@ class _ResultGenerator(Generator):
             if len(self.result_queue) == 0 and not runner.active_file_numbers:
                 self.state = self.GeneratorState.waiting_for_process
             else:
-                # If we have no results in the queue, but still monitored
-                # file numbers or elements in the output queue, wait on
-                # the threaded runner queue.
-                while len(self.result_queue) == 0 \
-                        and (runner.active_file_numbers
-                             or runner.output_queue.empty() is False):
+                # If we have no results in the queue, but the process is still
+                # running or the runner has elements in the output queue, wait
+                # on the threaded runner queue.
+                while len(self.result_queue) == 0 and runner.should_continue():
                     runner.process_queue()
                 if len(self.result_queue) > 0:
                     return self.result_queue.popleft()
@@ -443,7 +441,7 @@ class ThreadedRunner:
         # Process internal messages until no more active file descriptors
         # are present. This works because active file numbers are only
         # removed when an EOF is received in `self.process_queue`.
-        while self.active_file_numbers or self.output_queue.empty() is False:
+        while self.should_continue():
             self.process_queue()
 
         # Close communication channels to subprocess (if they were
@@ -462,6 +460,30 @@ class ThreadedRunner:
         self.close_process_stdin_stdout_stderr()
         self.wait_for_threads()
         return result
+
+    def should_continue(self):
+        """
+        Determine whether we should continue to process the queue
+        """
+        if self.process.poll() is not None:
+            # If the process has exited, we just drain the queue.
+            # Ensure that the reader threads have finished, in order to
+            # ensure that all stdout and stderr messages are enqueued and
+            # that the stdout, stderr closing indicators are enqueued.
+            for thread in (self.stderr_enqueueing_thread,
+                           self.stdout_enqueueing_thread):
+                if thread is not None and thread.is_alive():
+                    return True
+            # TODO: check if there are only timeouts in the queue
+            return not self.output_queue.empty()
+
+        # If the process is still running, continue, if we are
+        # interested in output, or still want to send input.
+        # This relies on the assumption, that the reader threads
+        # will send a file-closed indication for stdout and stderr
+        # if the process exits. That is why we wait for the reader
+        # threads to finish, when the process has exited.
+        return len(self.active_file_numbers) > 0
 
     def process_queue(self):
         """
@@ -560,6 +582,11 @@ class ThreadedRunner:
         for file_object in (self.process.stdout,
                             self.process.stderr):
             if file_object is not None:
+                # We remove the descriptors from the watched set. We
+                # still will get data, if the reader threads are running.
+                # This is done to ensure that we do not block on an empty
+                # queue while the process is exiting (especially if there
+                # are not timeout threads).
                 file_number = self.file_to_fileno.get(file_object, None)
                 if file_number is not None:
                     if file_number in self.active_file_numbers:
@@ -605,7 +632,11 @@ class ThreadedRunner:
                        self.stdin_timeout_thread):
             if thread is not None:
                 thread.request_exit()
-                #thread.join()
+                # The threads will eventually exit, but we do not join them
+                # here because the timeout threads might only exit after the
+                # timeout has expired, the reader threads will only exit
+                # on the next read, and the writer thread will only exit after
+                # it has gotten `None` from the queue
 
 
 def run_command(cmd: Union[str, List],
