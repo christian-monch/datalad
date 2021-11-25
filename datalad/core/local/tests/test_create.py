@@ -485,6 +485,9 @@ def check_create_path_semantics(
 
 
 def test_create_relpath_semantics():
+    import datalad.runner.nonasyncrunner as na
+    na.magic_marker = True
+
     yield check_create_path_semantics, 'subdir', None, 'subdir_relpath'
     #yield check_create_path_semantics, 'subdir', 'abspath', 'subdir_relpath'
     #yield check_create_path_semantics, 'subdir', 'abspath', 'abspath'
