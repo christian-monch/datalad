@@ -499,8 +499,7 @@ class ThreadedRunner:
         might modify the set of active file numbers if a file-closed event
         is read from the output queue, or if a timeout-callback return True.
         """
-        if magic_marker is True:
-            print("PC:", self.active_file_numbers)
+        print("PC:", self.active_file_numbers)
         data = None
         while True:
             # We do not need a user provided timeout here. If
@@ -514,8 +513,7 @@ class ThreadedRunner:
             try:
                 file_number, state, data = self.output_queue.get(
                     timeout=ThreadedRunner.timeout_resolution)
-                if magic_marker is True:
-                    print("OQ:", file_number, state, data)
+                print("OQ:", file_number, state, data)
                 break
             except Empty:
                 self.process_timeouts()
