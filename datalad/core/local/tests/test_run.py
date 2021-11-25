@@ -76,7 +76,7 @@ cat_command = 'cat' if not on_windows else 'type'
 
 
 @with_tempfile(mkdir=True)
-def test_invalid_call(path):
+def x_nest_invalid_call(path):
     with chpwd(path):
         # no dataset, no luck
         assert_raises(NoDatasetFound, run, 'doesntmatter')
@@ -94,7 +94,7 @@ def last_commit_msg(repo):
 
 @with_tempfile(mkdir=True)
 @with_tempfile(mkdir=True)
-def test_basics(path, nodspath):
+def x_nest_basics(path, nodspath):
     ds = Dataset(path).create()
     last_state = ds.repo.get_hexsha()
     # run inside the dataset
@@ -150,7 +150,7 @@ def test_basics(path, nodspath):
 #   receive.autogc=0 and gc.auto=0 from our common git options (gh-3482).
 # moreover the usage of unicode in the file names also breaks this on windows
 @with_tempfile(mkdir=True)
-def test_py2_unicode_command(path):
+def x_nest_py2_unicode_command(path):
     # Avoid OBSCURE_FILENAME to avoid windows-breakage (gh-2929).
     ds = Dataset(path).create()
     touch_cmd = "import sys; open(sys.argv[1], 'w').write('')"
@@ -182,7 +182,7 @@ def test_py2_unicode_command(path):
 
 
 @with_tempfile(mkdir=True)
-def test_sidecar(path):
+def x_nest_sidecar(path):
     ds = Dataset(path).create()
     # Simple sidecar message checks.
     ds.run("cd .> dummy0", message="sidecar arg", sidecar=True)
@@ -218,7 +218,7 @@ def test_sidecar(path):
 
 
 @with_tree(tree={"to_remove": "abc"})
-def test_run_save_deletion(path):
+def x_nest_run_save_deletion(path):
     ds = Dataset(path).create(force=True)
     ds.save()
     ds.run("{} to_remove".format("del" if on_windows else "rm"))
@@ -226,14 +226,14 @@ def test_run_save_deletion(path):
 
 
 @with_tempfile(mkdir=True)
-def test_run_from_subds(path):
+def x_nest_run_from_subds(path):
     subds = Dataset(path).create().create("sub")
     subds.run("cd .> foo")
     assert_repo_status(subds.path)
 
 
 @with_tree(tree={"sub": {"input": ""}})
-def test_run_from_subds_gh3551(path):
+def x_nest_run_from_subds_gh3551(path):
     ds = Dataset(path).create(force=True)
     ds.save()
     ds.create("output")
@@ -271,7 +271,7 @@ def test_run_from_subds_gh3551(path):
 
 
 @with_tempfile(mkdir=True)
-def test_run_assume_ready(path):
+def x_nest_run_assume_ready(path):
     ds = Dataset(path).create()
     repo = ds.repo
     adjusted = repo.is_managed_branch()
@@ -339,7 +339,7 @@ def test_run_assume_ready(path):
 
 @with_tempfile()
 @with_tempfile()
-def test_run_explicit(origpath, path):
+def x_nest_run_explicit(origpath, path):
     origds = Dataset(origpath).create()
     (origds.pathobj / "test-annex.dat").write_text('content')
     origds.save()
@@ -399,7 +399,7 @@ def test_run_explicit(origpath, path):
 @with_tree(tree={OBSCURE_FILENAME + u".t": "obscure",
                  "bar.txt": "b",
                  "foo blah.txt": "f"})
-def test_inputs_quotes_needed(path):
+def x_nest_inputs_quotes_needed(path):
     ds = Dataset(path).create(force=True)
     ds.save()
     cmd = "import sys; open(sys.argv[-1], 'w').write('!'.join(sys.argv[1:]))"
@@ -422,7 +422,7 @@ def test_inputs_quotes_needed(path):
 
 
 @with_tree(tree={"foo": "f", "bar": "b"})
-def test_inject(path):
+def x_nest_inject(path):
     ds = Dataset(path).create(force=True)
     assert_repo_status(ds.path, untracked=['foo', 'bar'])
     list(run_command("nonsense command",
@@ -435,7 +435,7 @@ def test_inject(path):
 
 
 @with_tempfile(mkdir=True)
-def test_format_command_strip_leading_dashes(path):
+def x_nest_format_command_strip_leading_dashes(path):
     ds = Dataset(path).create()
     eq_(format_command(ds, ["--", "cmd", "--opt"]),
         '"cmd" "--opt"' if on_windows else "cmd --opt")
@@ -448,7 +448,7 @@ def test_format_command_strip_leading_dashes(path):
 
 
 @with_tempfile(mkdir=True)
-def test_run_cmdline_disambiguation(path):
+def x_nest_run_cmdline_disambiguation(path):
     Dataset(path).create()
     with chpwd(path):
         # Without a positional argument starting a command, any option is
@@ -483,7 +483,7 @@ def test_run_cmdline_disambiguation(path):
 
 
 @with_tempfile(mkdir=True)
-def test_run_path_semantics(path):
+def x_nest_run_path_semantics(path):
     # Test that we follow path resolution from gh-3435: paths are relative to
     # dataset if a dataset instance is given and relative to the current
     # working directory otherwise.
@@ -538,7 +538,7 @@ def test_run_path_semantics(path):
 
 
 @with_tempfile(mkdir=True)
-def test_run_remove_keeps_leading_directory(path):
+def x_nest_run_remove_keeps_leading_directory(path):
     ds = Dataset(op.join(path, "ds")).create()
     repo = ds.repo
 
@@ -568,7 +568,7 @@ def test_run_remove_keeps_leading_directory(path):
 
 
 @with_tempfile(mkdir=True)
-def test_run_reglob_outputs(path):
+def x_nest_run_reglob_outputs(path):
     ds = Dataset(path).create()
     repo = ds.repo
     (ds.pathobj / "write_text.py").write_text("""
@@ -590,7 +590,7 @@ with open(name + ".txt", "w") as fh:
 
 
 @with_tempfile(mkdir=True)
-def test_run_unexpanded_placeholders(path):
+def x_nest_run_unexpanded_placeholders(path):
     ds = Dataset(path).create()
     cmd = [sys.executable, "-c",
            "import sys; open(sys.argv[1], 'w').write(' '.join(sys.argv[2:]))"]
@@ -613,7 +613,7 @@ def test_run_unexpanded_placeholders(path):
 
 
 @with_tempfile(mkdir=True)
-def test_run_empty_repo(path):
+def x_nest_run_empty_repo(path):
     ds = Dataset(path).create()
     cmd = [sys.executable, "-c", "open('foo', 'w').write('')"]
     # Using "*" in a completely empty repo will fail.
@@ -627,7 +627,7 @@ def test_run_empty_repo(path):
 
 
 @with_tree(tree={"foo": "f", "bar": "b"})
-def test_dry_run(path):
+def x_nest_dry_run(path):
     ds = Dataset(path).create(force=True)
 
     # The dataset is reported as dirty, and the custom result render relays

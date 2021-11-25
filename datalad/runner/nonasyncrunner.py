@@ -13,6 +13,7 @@ Thread based subprocess execution with stdout and stderr passed to protocol obje
 import enum
 import logging
 import subprocess
+import sys
 import time
 from collections import deque
 from collections.abc import Generator

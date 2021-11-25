@@ -20,7 +20,7 @@ from datalad.interface.utils import (
 )
 
 
-def test_generic_result_renderer():
+def x_nest_generic_result_renderer():
     # a bunch of bad cases of results
     testcases = [
         # an empty result will surface

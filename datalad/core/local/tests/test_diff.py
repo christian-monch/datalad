@@ -57,7 +57,7 @@ from datalad.api import (
 )
 
 
-def test_magic_number():
+def x_nest_magic_number():
     # we hard code the magic SHA1 that represents the state of a Git repo
     # prior to the first commit -- used to diff from scratch to a specific
     # commit
@@ -71,7 +71,7 @@ def test_magic_number():
 
 @with_tempfile(mkdir=True)
 @with_tempfile(mkdir=True)
-def test_repo_diff(path, norepo):
+def x_nest_repo_diff(path, norepo):
     ds = Dataset(path).create()
     assert_repo_status(ds.path)
     assert_raises(ValueError, ds.repo.diff, fr='WTF', to='MIKE')
@@ -158,7 +158,7 @@ def _dirty_results(res):
 # that focuses on the high-level command API
 @with_tempfile(mkdir=True)
 @with_tempfile(mkdir=True)
-def test_diff(path, norepo):
+def x_nest_diff(path, norepo):
     with chpwd(norepo):
         assert_raises(NoDatasetFound, diff)
     ds = Dataset(path).create()
@@ -255,7 +255,7 @@ def test_diff(path, norepo):
 
 
 @with_tempfile(mkdir=True)
-def test_diff_recursive(path):
+def x_nest_diff_recursive(path):
     ds = Dataset(path).create()
     sub = ds.create('sub')
     # look at the last change, and confirm a dataset was added
@@ -342,7 +342,7 @@ def test_diff_recursive(path):
 @known_failure_githubci_win
 @with_tempfile(mkdir=True)
 @with_tempfile()
-def test_path_diff(_path, linkpath):
+def x_nest_path_diff(_path, linkpath):
     # do the setup on the real path, not the symlink, to have its
     # bugs not affect this test of status()
     ds = get_deeply_nested_structure(str(_path))
@@ -448,7 +448,7 @@ def test_path_diff(_path, linkpath):
 
 @with_tempfile(mkdir=True)
 @with_tempfile(mkdir=True)
-def test_diff_nods(path, otherpath):
+def x_nest_diff_nods(path, otherpath):
     ds = Dataset(path).create()
     assert_result_count(
         ds.diff(path=otherpath, on_failure='ignore', result_renderer='disabled'),
@@ -468,7 +468,7 @@ def test_diff_nods(path, otherpath):
 
 
 @with_tempfile(mkdir=True)
-def test_diff_rsync_syntax(path):
+def x_nest_diff_rsync_syntax(path):
     # three nested datasets
     ds = Dataset(path).create()
     subds = ds.create('sub')
@@ -504,7 +504,7 @@ def test_diff_rsync_syntax(path):
 
 
 @with_tempfile(mkdir=True)
-def test_diff_nonexistent_ref_unicode(path):
+def x_nest_diff_nonexistent_ref_unicode(path):
     ds = Dataset(path).create()
     assert_result_count(
         ds.diff(fr="HEAD", to=u"β", on_failure="ignore", result_renderer='disabled'),
@@ -515,7 +515,7 @@ def test_diff_nonexistent_ref_unicode(path):
 
 # https://github.com/datalad/datalad/issues/3997
 @with_tempfile(mkdir=True)
-def test_no_worktree_impact_false_deletions(path):
+def x_nest_no_worktree_impact_false_deletions(path):
     ds = Dataset(path).create()
     # create a branch that has no new content
     ds.repo.call_git(['checkout', '-b', 'test'])
@@ -543,7 +543,7 @@ def test_no_worktree_impact_false_deletions(path):
 
 
 @with_tempfile(mkdir=True)
-def test_diff_fr_none_one_get_content_annexinfo_call(path):
+def x_nest_diff_fr_none_one_get_content_annexinfo_call(path):
     from datalad.support.annexrepo import AnnexRepo
     ds = Dataset(path).create()
     (ds.pathobj / "foo").write_text("foo")

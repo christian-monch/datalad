@@ -60,7 +60,7 @@ raw = dict(return_type='list', result_filter=None, result_xfm=None, on_failure='
 
 @with_tempfile(mkdir=True)
 @with_tempfile
-def test_create_raises(path, outside_path):
+def x_nest_create_raises(path, outside_path):
     ds = Dataset(path)
     # incompatible arguments (annex only):
     assert_raises(ValueError, ds.create, annex=False, description='some')
@@ -126,7 +126,7 @@ def test_create_raises(path, outside_path):
 
 
 @with_tempfile
-def test_create_force_subds(path):
+def x_nest_create_force_subds(path):
     ds = Dataset(path).create()
     subds = ds.create("subds")
     # We get an error when trying calling create in an existing subdataset
@@ -147,7 +147,7 @@ def test_create_force_subds(path):
 
 @with_tempfile
 @with_tempfile
-def test_create_curdir(path, path2):
+def x_nest_create_curdir(path, path2):
     with chpwd(path, mkdir=True):
         create()
     ds = Dataset(path)
@@ -164,7 +164,7 @@ def test_create_curdir(path, path2):
 
 @with_tempfile
 @with_tempfile
-def test_create(probe, path):
+def x_nest_create(probe, path):
     # only as a probe whether this FS is a crippled one
     ar = AnnexRepo(probe, create=True)
 
@@ -192,7 +192,7 @@ def test_create(probe, path):
 
 
 @with_tempfile
-def test_create_sub(path):
+def x_nest_create_sub(path):
 
     ds = Dataset(path)
     ds.create()
@@ -237,7 +237,7 @@ def test_create_sub(path):
 
 
 @with_tempfile
-def test_create_sub_gh3463(path):
+def x_nest_create_sub_gh3463(path):
     ds = Dataset(path)
     ds.create()
 
@@ -252,14 +252,14 @@ def test_create_sub_gh3463(path):
 
 
 @with_tempfile(mkdir=True)
-def test_create_dataset_same_as_path(path):
+def x_nest_create_dataset_same_as_path(path):
     with chpwd(path):
         ds = create(dataset=".", path=".")
     assert_repo_status(ds.path)
 
 
 @with_tempfile
-def test_create_sub_dataset_dot_no_path(path):
+def x_nest_create_sub_dataset_dot_no_path(path):
     ds = Dataset(path)
     ds.create()
 
@@ -279,7 +279,7 @@ def test_create_sub_dataset_dot_no_path(path):
 
 
 @with_tree(tree=_dataset_hierarchy_template)
-def test_create_subdataset_hierarchy_from_top(path):
+def x_nest_create_subdataset_hierarchy_from_top(path):
     # how it would look like to overlay a subdataset hierarchy onto
     # an existing directory tree
     ds = Dataset(op.join(path, 'origin')).create(force=True)
@@ -310,7 +310,7 @@ def test_create_subdataset_hierarchy_from_top(path):
 
 
 @with_tempfile
-def test_nested_create(path):
+def x_nest_nested_create(path):
     # to document some more organic usage pattern
     ds = Dataset(path).create()
     assert_repo_status(ds.path)
@@ -365,7 +365,7 @@ def test_nested_create(path):
 
 # Imported from #1016
 @with_tree({'ds2': {'file1.txt': 'some'}})
-def test_saving_prior(topdir):
+def x_nest_saving_prior(topdir):
     # the problem is that we might be saving what is actually needed to be
     # "created"
 
@@ -384,7 +384,7 @@ def test_saving_prior(topdir):
 
 
 @with_tempfile(mkdir=True)
-def test_create_withcfg(path):
+def x_nest_create_withcfg(path):
     ds = create(
         dataset=path,
         cfg_proc=['yoda'])
@@ -399,7 +399,7 @@ def test_create_withcfg(path):
 
 
 @with_tempfile(mkdir=True)
-def test_create_fake_dates(path):
+def x_nest_create_fake_dates(path):
     ds = create(path, fake_dates=True)
 
     ok_(ds.config.getbool("datalad", "fake-dates"))
@@ -415,7 +415,7 @@ def test_create_fake_dates(path):
 
 
 @with_tempfile(mkdir=True)
-def test_cfg_passthrough(path):
+def x_nest_cfg_passthrough(path):
     runner = Runner()
     _ = runner.run(
         ['datalad',
@@ -431,7 +431,7 @@ def test_cfg_passthrough(path):
             "nonempty": {".git": {"bogus": "content"}, "ds": {}},
             "git_with_head": {".git": {"HEAD": ""}, "ds": {}}
             })
-def test_empty_git_upstairs(topdir):
+def x_nest_empty_git_upstairs(topdir):
     # create() doesn't get confused by an empty .git/ upstairs (gh-3473)
     assert_in_results(
         create(op.join(topdir, "empty", "ds"), **raw),
@@ -454,7 +454,7 @@ def check_create_obscure(create_kwargs, path):
     ok_(ds.is_installed())
 
 
-def test_create_with_obscure_name():
+def x_nest_create_with_obscure_name():
     fname = OBSCURE_FILENAME
     yield check_create_obscure, {"path": fname}
     yield check_create_obscure, {"dataset": fname}
@@ -486,22 +486,22 @@ def check_create_path_semantics(
 
 def test_create_relpath_semantics():
     yield check_create_path_semantics, 'subdir', None, 'subdir_relpath'
-    yield check_create_path_semantics, 'subdir', 'abspath', 'subdir_relpath'
-    yield check_create_path_semantics, 'subdir', 'abspath', 'abspath'
-    yield check_create_path_semantics, 'parentds', None, 'relpath'
-    yield check_create_path_semantics, 'parentds', 'abspath', 'relpath'
-    yield check_create_path_semantics, 'parentds', 'abspath', 'abspath'
-    yield check_create_path_semantics, None, 'abspath', 'abspath'
-    yield check_create_path_semantics, None, 'instance', 'abspath'
-    yield check_create_path_semantics, None, 'instance', 'relpath'
-    yield check_create_path_semantics, 'elsewhere', 'abspath', 'abspath'
-    yield check_create_path_semantics, 'elsewhere', 'instance', 'abspath'
-    yield check_create_path_semantics, 'elsewhere', 'instance', 'relpath'
+    #yield check_create_path_semantics, 'subdir', 'abspath', 'subdir_relpath'
+    #yield check_create_path_semantics, 'subdir', 'abspath', 'abspath'
+    #yield check_create_path_semantics, 'parentds', None, 'relpath'
+    #yield check_create_path_semantics, 'parentds', 'abspath', 'relpath'
+    #yield check_create_path_semantics, 'parentds', 'abspath', 'abspath'
+    #yield check_create_path_semantics, None, 'abspath', 'abspath'
+    #yield check_create_path_semantics, None, 'instance', 'abspath'
+    #yield check_create_path_semantics, None, 'instance', 'relpath'
+    #yield check_create_path_semantics, 'elsewhere', 'abspath', 'abspath'
+    #yield check_create_path_semantics, 'elsewhere', 'instance', 'abspath'
+    #yield check_create_path_semantics, 'elsewhere', 'instance', 'relpath'
 
 
 @with_tempfile(mkdir=True)
 @with_tempfile()
-def test_gh2927(path, linkpath):
+def x_nest_gh2927(path, linkpath):
     if has_symlink_capability():
         # make it more complicated by default
         Path(linkpath).symlink_to(path, target_is_directory=True)
@@ -528,13 +528,13 @@ def check_create_initopts_form(form, path):
     ok_exists(ds.repo.dot_git / "foo")
 
 
-def test_create_initopts_form():
+def x_nest_create_initopts_form():
     yield check_create_initopts_form, "dict"
     yield check_create_initopts_form, "list"
 
 
 @with_tempfile
-def test_bad_cfg_proc(path):
+def x_nest_bad_cfg_proc(path):
     ds = Dataset(path)
     # check if error is raised for incorrect cfg_proc
     assert_raises(ValueError, ds.create, path=path, cfg_proc='unknown')
