@@ -509,6 +509,7 @@ class ThreadedRunner:
             try:
                 file_number, state, data = self.output_queue.get(
                     timeout=ThreadedRunner.timeout_resolution)
+                print(file_number, state, data)
                 break
             except Empty:
                 self.process_timeouts()

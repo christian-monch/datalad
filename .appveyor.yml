@@ -52,7 +52,6 @@ shallow_clone: false
 
 
 environment:
-  DATALAD_TESTS_SSH: 1
 
   # Do not use `image` as a matrix dimension, to have fine-grained control over
   # what tests run on which platform
@@ -65,19 +64,10 @@ environment:
     # List a CI run for each platform first, to have immediate access when there
     # is a need for debugging
 
-    # Ubuntu core tests
-    - ID: Ubu20
-      # ~35min
-      DTS: datalad
-      APPVEYOR_BUILD_WORKER_IMAGE: Ubuntu2004
-      INSTALL_SYSPKGS: python3-virtualenv
-      CODECOV_BINARY: https://uploader.codecov.io/latest/linux/codecov
-      # system git-annex is way too old, use better one
-      INSTALL_GITANNEX: git-annex -m deb-url --url http://snapshot.debian.org/archive/debian/20210906T204127Z/pool/main/g/git-annex/git-annex_8.20210903-1_amd64.deb
     # Windows core tests
     - ID: WinP39core
       # ~35 min
-      DTS: datalad.core datalad.runner
+      DTS: datalad.core
       APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
       # Python version specification is non-standard on windows
       PY: 39-x64
@@ -85,87 +75,6 @@ environment:
       # it would need setup of a GITHUB_TOKEN to access.
       # This one is set in master but kept without change in maint for now
       # INSTALL_GITANNEX: git-annex -m datalad/packages
-    # MacOS core tests
-    - ID: MacP38core
-      # ~25min
-      DTS: datalad.core datalad.runner
-      APPVEYOR_BUILD_WORKER_IMAGE: macOS
-      PY: 3.8
-      # does not give a functional installation
-      # INSTALL_GITANNEX: git-annex -m snapshot
-      #INSTALL_GITANNEX: git-annex=8.20201129
-      INSTALL_GITANNEX: git-annex
-      DATALAD_LOCATIONS_SOCKETS: /Users/appveyor/DLTMP/sockets
-      CODECOV_BINARY: https://uploader.codecov.io/latest/macos/codecov
-
-    # Additional test runs
-    - ID: WinP39a1
-      # ~45min
-      DTS: >
-          datalad.cmdline
-          datalad.customremotes
-          datalad.distribution
-          datalad.distributed
-          datalad.downloaders
-          datalad.interface
-          datalad.tests
-      # TODO: datalad.metadata (this is completely non-functional on Windows,
-      #       either tests only, or actual code too)
-      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
-      PY: 39-x64
-    - ID: WinP39a2
-      # ~50min
-      DTS: >
-          datalad.local
-          datalad.support
-          datalad.ui
-      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2022
-      PY: 39-x64
-
-    - ID: MacP38a1
-      # ~45min
-      DTS: >
-          datalad.cmdline
-          datalad.customremotes
-          datalad.distribution
-          datalad.downloaders
-          datalad.interface
-      APPVEYOR_BUILD_WORKER_IMAGE: macOS
-      PY: 3.8
-      INSTALL_GITANNEX: git-annex
-      DATALAD_LOCATIONS_SOCKETS: /Users/appveyor/DLTMP/sockets
-      CODECOV_BINARY: https://uploader.codecov.io/latest/macos/codecov
-    - ID: MacP38a2
-      # ~35min
-      DTS: >
-          datalad.local
-          datalad.distributed
-          datalad.support
-          datalad.tests
-          datalad.ui
-      APPVEYOR_BUILD_WORKER_IMAGE: macOS
-      PY: 3.8
-      INSTALL_GITANNEX: git-annex
-      DATALAD_LOCATIONS_SOCKETS: /Users/appveyor/DLTMP/sockets
-      CODECOV_BINARY: https://uploader.codecov.io/latest/macos/codecov
-
-    # Test alternative Python versions
-    - ID: Ubu20P36
-      PY: 3.6
-      DTS: datalad
-      APPVEYOR_BUILD_WORKER_IMAGE: Ubuntu2004
-      INSTALL_SYSPKGS: python3-virtualenv
-      CODECOV_BINARY: https://uploader.codecov.io/latest/linux/codecov
-      # system git-annex is way too old, use better one
-      INSTALL_GITANNEX: git-annex -m deb-url --url http://snapshot.debian.org/archive/debian/20210906T204127Z/pool/main/g/git-annex/git-annex_8.20210903-1_amd64.deb
-    - ID: Ubu20P37
-      PY: 3.7
-      DTS: datalad
-      APPVEYOR_BUILD_WORKER_IMAGE: Ubuntu2004
-      INSTALL_SYSPKGS: python3-virtualenv
-      CODECOV_BINARY: https://uploader.codecov.io/latest/linux/codecov
-      # system git-annex is way too old, use better one
-      INSTALL_GITANNEX: git-annex -m deb-url --url http://snapshot.debian.org/archive/debian/20210906T204127Z/pool/main/g/git-annex/git-annex_8.20210903-1_amd64.deb
 
 matrix:
   allow_failures:
