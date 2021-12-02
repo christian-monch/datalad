@@ -1,0 +1,3 @@
+# compatibility kludge - just use datalad-shellcompletion from now on
+
+datalad shell-completion
