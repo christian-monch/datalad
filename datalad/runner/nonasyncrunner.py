@@ -427,7 +427,6 @@ class ThreadedRunner:
         self.process_waiting_thread.start()
 
         if issubclass(self.protocol_class, GeneratorMixIn):
-            assert isinstance(self.protocol, GeneratorMixIn)
             return _ResultGenerator(self, self.protocol.result_queue)
 
         return self.process_loop()
