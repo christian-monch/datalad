@@ -3779,7 +3779,7 @@ class BatchedAnnex(BatchedCommand):
     """
 
     def __init__(self, annex_cmd, git_options=None, annex_options=None, path=None,
-                 json=False, output_proc=None):
+                 json=False, output_proc=None, remain_handler=None):
         if not isinstance(annex_cmd, list):
             annex_cmd = [annex_cmd]
         cmd = \
@@ -3796,7 +3796,8 @@ class BatchedAnnex(BatchedCommand):
         super(BatchedAnnex, self).__init__(
             cmd,
             path=path,
-            output_proc=output_proc)
+            output_proc=output_proc,
+            remain_handler=remain_handler)
 
 
 # TODO: Why was this commented out?

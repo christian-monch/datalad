@@ -182,6 +182,7 @@ class BatchedCommand(SafeDelCloseMixin):
                  output_proc: Callable = None,
                  timeout: Optional[float] = None,
                  exception_on_timeout: bool = False,
+                 remain_handler: Callable = None
                  ):
 
         command = cmd
@@ -190,6 +191,7 @@ class BatchedCommand(SafeDelCloseMixin):
         self.output_proc = output_proc
         self.timeout = timeout
         self.exception_on_timeout = exception_on_timeout
+        self.remain_handler = remain_handler
 
         self.stdin_queue = None
         self.stderr_output = b""
@@ -470,6 +472,8 @@ class BatchedCommand(SafeDelCloseMixin):
 
             if remaining:
                 lgr.debug(f"{self}: remaining content: {remaining}")
+                if self.remain_handler:
+                    self.remain_handler(remaining)
 
             self.wait_timed_out = timeout is True
             if self.wait_timed_out:

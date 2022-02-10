@@ -20,6 +20,7 @@ import string
 import sys
 
 from functools import partial
+from typing import List
 from urllib.parse import urlparse
 
 from datalad.support.external_versions import external_versions
@@ -966,7 +967,8 @@ class BatchedRegisterUrl(RegisterUrl):
                batch_input,
                output_proc=None,
                json=False,
-               batch_options=None):
+               batch_options=None,
+               remain_handler=None):
 
         bcmd = self._batch_commands.get(command)
         if not bcmd:
@@ -976,7 +978,8 @@ class BatchedRegisterUrl(RegisterUrl):
                 path=repo.path,
                 json=json,
                 output_proc=output_proc,
-                annex_options=batch_options)
+                annex_options=batch_options,
+                remain_handler=remain_handler)
             self._batch_commands[command] = bcmd
         return bcmd(batch_input)
 
@@ -998,9 +1001,16 @@ class BatchedRegisterUrl(RegisterUrl):
     def _ignore(_stdout):
         return
 
+    @staticmethod
+    def _remain_handler(remaining_content: List[str]):
+        if remaining_content != ["registerurl stdin ok"]:
+            lgr.warning(f"unexpected output from git annex "
+                        f"registerurl: {remaining_content[0]}")
+
     def registerurl(self, key, url):
         self._batch("registerurl", (key, url),
-                    output_proc=self._ignore, json=False)
+                    output_proc=self._ignore, json=False,
+                    remain_handler=self._remain_handler)
 
 
 def _log_filter_addurls(res):
