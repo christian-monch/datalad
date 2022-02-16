@@ -116,6 +116,19 @@ class GitRepo(RepoInterface, metaclass=PathBasedFlyweight):
         pass
 
     @classmethod
+    def _flyweight_id_from_args(cls, *args, **kwargs):
+        known_kwargs = getattr(cls, "_init_keyword_args", {})
+        args_string = "+".join(str(arg) for arg in args)
+        kwargs_string = "+".join([
+            str(item)
+            for item in sorted({
+                **known_kwargs,
+                **kwargs
+            }.items())
+        ])
+        return hash(args_string + '|' + kwargs_string), args, kwargs
+
+    @classmethod
     def _cleanup(cls, path):
         # Ben: I think in case of GitRepo there's nothing to do ATM. Statements
         #      like the one in the out commented __del__ above, don't make sense

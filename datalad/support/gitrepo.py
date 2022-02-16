@@ -787,6 +787,18 @@ class GitRepo(CoreGitRepo):
     GIT_MIN_VERSION = "2.19.1"
     git_version = None
 
+    # Used by flyweight to create a canonical representation of args and kwargs
+    # that are passed to the constructor.
+    _init_keyword_args = dict(
+        path=None,
+        runner=None,
+        create=True,
+        git_opts=None,
+        repo=None,
+        fake_dates=False,
+        create_sanity_checks=True
+    )
+
     @classmethod
     def _check_git_version(cls):
         external_versions.check("cmd:git", min_version=cls.GIT_MIN_VERSION)
