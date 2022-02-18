@@ -492,6 +492,7 @@ def _configure_remote(
                     recursive=False,
                     on_failure='ignore',
                     return_type='generator',
+                    result_renderer='disabled',
                     result_xfm=None):
                 # fixup refds
                 r.update(res_kwargs)
