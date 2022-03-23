@@ -1001,7 +1001,7 @@ class AnnexRepo(GitRepo, RepoInterface):
             # we don't know how to handle this, just pass it on
             raise
 
-    def _call_annex_records(self, args, files=None, jobs=None,
+    def old_call_annex_records(self, args, files=None, jobs=None,
                             git_options=None,
                             stdin=None,
                             merge_annex_branches=True,
@@ -1153,15 +1153,15 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         return return_objects
 
-    def _call_annex_records_items_(self,
-                                   args,
-                                   files=None,
-                                   jobs=None,
-                                   git_options=None,
-                                   stdin=None,
-                                   merge_annex_branches=True,
-                                   progress=False,
-                                   **kwargs):
+    def new_call_annex_records(self,
+                            args,
+                            files=None,
+                            jobs=None,
+                            git_options=None,
+                            stdin=None,
+                            merge_annex_branches=True,
+                            progress=False,
+                            **kwargs):
         """Yielding git-annex command execution with JSON result processing
 
         `_call_annex()` is used for git-annex command execution, using
@@ -1239,6 +1239,11 @@ class AnnexRepo(GitRepo, RepoInterface):
         # additional non-JSON data on stdout, nor does is raise a RuntimeError
         # if only non-JSON data was received on stdout.
         return
+
+    def new_emulating_call_annex_records(self, *args, **kwargs):
+        return list(self.new_call_annex_records(*args, **kwargs))
+
+    _call_annex_records = new_call_annex_records
 
     def call_annex_records(self, args, files=None):
         """Call annex with `--json*` to request structured result records
@@ -1569,7 +1574,7 @@ class AnnexRepo(GitRepo, RepoInterface):
         else:
             cmd = ['get'] + options
             files_arg = files
-        results = self._call_annex_records(
+        results_list = list(self._call_annex_records(
             cmd,
             # TODO: eventually make use of --batch mode
             files=files_arg,
@@ -1577,8 +1582,7 @@ class AnnexRepo(GitRepo, RepoInterface):
             progress=True,
             # filter(bool,   to avoid trying to add up None's when size is not known
             total_nbytes=sum(filter(bool, expected_downloads.values())),
-        )
-        results_list = list(results)
+        ))
         # TODO:  should we here compare fetch_files against result_list
         # and vomit an exception of incomplete download????
         return results_list
@@ -1749,12 +1753,11 @@ class AnnexRepo(GitRepo, RepoInterface):
         else:
             if backend:
                 options.extend(('--backend', backend))
-            for r in self._call_annex_records(
+            yield from self._call_annex_records(
                     ['add'] + options,
                     files=files,
                     jobs=jobs,
-                    total_nbytes=sum(expected_additions.values())):
-                yield r
+                    total_nbytes=sum(expected_additions.values()))
 
     @normalize_paths
     def get_file_key(self, files, batch=None):
@@ -2164,9 +2167,11 @@ class AnnexRepo(GitRepo, RepoInterface):
                 lgr.debug("Not batching addurl call "
                           "because fake dates are enabled")
             files_opt = '--file=%s' % file_
-            out_json = self._call_annex_records(
-                ['addurl'] + options + [files_opt] + [url],
-                progress=True,
+            out_json = list(
+                self._call_annex_records(
+                    ['addurl'] + options + [files_opt] + [url],
+                    progress=True,
+                )
             )
             if len(out_json) != 1:
                 raise AssertionError(
@@ -2239,10 +2244,10 @@ class AnnexRepo(GitRepo, RepoInterface):
         if backend:
             options.extend(('--backend', backend))
 
-        return self._call_annex_records(
+        return list(self._call_annex_records(
             ['addurl'] + options + urls,
             git_options=git_options,
-            progress=True)
+            progress=True))
 
     @normalize_path
     def rm_url(self, file_, url):
@@ -2326,10 +2331,10 @@ class AnnexRepo(GitRepo, RepoInterface):
             else:
                 return res
         else:
-            return self._call_annex_records(
+            return list(self._call_annex_records(
                 ['drop'] + options,
                 files=files,
-                jobs=jobs)
+                jobs=jobs))
 
     def drop_key(self, keys, options=None, batch=False):
         """Drops the content of annexed files from this repository referenced by keys
@@ -2930,11 +2935,14 @@ class AnnexRepo(GitRepo, RepoInterface):
         #    if not (incremental is True):
         #        args.append('--incremental-schedule={}'.format(incremental))
         try:
-            return self._call_annex_records(
+            # We have to wrap it into list constructor because
+            # _call_annex_records returns a generator and the callers
+            # do not always iterate over it.
+            return list(self._call_annex_records(
                 ['fsck'] + args,
                 files=paths,
                 git_options=git_options,
-            )
+            ))
         except CommandError as e:
             # fsck may exit non-zero when there are too few known copies
             # callers of whereis are interested in exactly that information,
@@ -3014,14 +3022,13 @@ class AnnexRepo(GitRepo, RepoInterface):
 
         # TODO: provide more meaningful message (possibly aggregating 'note'
         #  from annex failed ones
-        results = self._call_annex_records(
+        result_list = list(self._call_annex_records(
             ['copy'] + annex_options,
             files=files,  # copy_files,
             jobs=jobs,
             progress=True,
             total_nbytes=total_nbytes,
-        )
-        results_list = list(results)
+        ))
         # XXX this is the only logic different ATM from get
         # check if any transfer failed since then we should just raise an Exception
         # for now to guarantee consistent behavior with non--json output

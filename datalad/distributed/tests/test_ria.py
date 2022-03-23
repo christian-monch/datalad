@@ -66,7 +66,7 @@ def test_ephemeral(ds_path, store_path, clone_path):
 
         # new content should already be in store
         # (except the store doesn't know yet)
-        res = eph_clone.repo.fsck(remote="riastore-storage", fast=True)
+        res = tuple(eph_clone.repo.fsck(remote="riastore-storage", fast=True))
         assert_equal(len(res), 2)
         assert_result_count(res, 1, success=True, file=file_test.as_posix())
         assert_result_count(res, 1, success=True, file=file_testsub.as_posix())

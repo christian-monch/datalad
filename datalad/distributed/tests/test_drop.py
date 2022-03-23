@@ -171,7 +171,7 @@ def test_drop_allkeys(origpath, clonepath):
     ds.save()
 
     # confirm we have two keys
-    eq_(2, repo.call_annex_records(['info'])[0]['local annex keys'])
+    eq_(2, tuple(repo.call_annex_records(['info']))[0]['local annex keys'])
 
     # do it wrong first
     assert_in_results(
@@ -184,24 +184,24 @@ def test_drop_allkeys(origpath, clonepath):
             'allkeys', [ds.pathobj / 'some']),
     )
     # confirm we still have two keys
-    eq_(2, repo.call_annex_records(['info'])[0]['local annex keys'])
+    eq_(2, tuple(repo.call_annex_records(['info']))[0]['local annex keys'])
 
     # clone the beast and get all keys into the clone
     dsclone = clone(ds.path, clonepath)
     dsclone.repo.call_annex(['get', '--all'])
     # confirm we have two keys in the clone
-    eq_(2, dsclone.repo.call_annex_records(['info'])[0]['local annex keys'])
+    eq_(2, tuple(dsclone.repo.call_annex_records(['info']))[0]['local annex keys'])
 
     # now cripple availability by dropping the "hidden" key at origin
     repo.call_annex(['drop', '--branch', 'otherbranch', '--force'])
     # confirm one key left
-    eq_(1, repo.call_annex_records(['info'])[0]['local annex keys'])
+    eq_(1, tuple(repo.call_annex_records(['info']))[0]['local annex keys'])
 
     # and now drop all keys from the clone, one is redundant and can be
     # dropped, the other is not and must fail
     res = dsclone.drop(what='allkeys', jobs=2, on_failure='ignore')
     # confirm one key gone, one left
-    eq_(1, dsclone.repo.call_annex_records(['info'])[0]['local annex keys'])
+    eq_(1, tuple(dsclone.repo.call_annex_records(['info']))[0]['local annex keys'])
     assert_result_count(res, 1, action='drop', status='error', type='key')
     assert_result_count(res, 1, action='drop', status='ok', type='key')
     # now force it
@@ -210,7 +210,7 @@ def test_drop_allkeys(origpath, clonepath):
     assert_result_count(res, 1)
     assert_result_count(res, 1, action='drop', status='ok', type='key')
     # all gone
-    eq_(0, dsclone.repo.call_annex_records(['info'])[0]['local annex keys'])
+    eq_(0, tuple(dsclone.repo.call_annex_records(['info']))[0]['local annex keys'])
 
 
 @with_tempfile
