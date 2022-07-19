@@ -76,6 +76,8 @@ class _ResultGenerator(Generator):
         self.return_code = None
         self.state = self.GeneratorState.process_running
         self.all_closed = False
+        self.start_time = time.time()
+        self.run_time = 0.0
 
     def _check_result(self):
         self.runner._check_result()
@@ -117,6 +119,11 @@ class _ResultGenerator(Generator):
             if len(self.result_queue) > 0:
                 return self.result_queue.popleft()
             self.runner.generator = None
+            self.run_time = time.time() - self.start_time
+            from .runner import WitlessRunner
+            WitlessRunner.accumulated_runtime += self.run_time
+            print(self.runner.cmd)
+            print(self.run_time, WitlessRunner.accumulated_runtime)
             raise StopIteration(self.return_code)
 
     def throw(self, exception_type, value=None, trace_back=None):

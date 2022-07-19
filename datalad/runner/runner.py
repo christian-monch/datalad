@@ -10,6 +10,11 @@
 """
 
 import logging
+import time
+from typing import (
+    Dict,
+    cast,
+)
 
 from .coreprotocols import NoCapture
 from .exception import CommandError
@@ -28,6 +33,9 @@ class WitlessRunner(object):
     """
     __slots__ = ['cwd', 'env', 'threaded_runner']
 
+    calls = 0
+    accumulated_runtime = 0.0
+
     def __init__(self, cwd=None, env=None):
         """
         Parameters
@@ -44,9 +52,7 @@ class WitlessRunner(object):
         self.env = env
         # stringify to support Path instances on PY35
         self.cwd = str(cwd) if cwd is not None else None
-
         self.threaded_runner = None
-
 
     def _get_adjusted_env(self, env=None, cwd=None, copy=True):
         """Return an adjusted copy of an execution environment
@@ -181,12 +187,14 @@ class WitlessRunner(object):
             env=env
         )
 
+        WitlessRunner.calls += 1
+        start_time = time.time()
         results_or_iterator = self.threaded_runner.run()
 
         if issubclass(protocol, GeneratorMixIn):
             return results_or_iterator
         else:
-            results = results_or_iterator
+            results: Dict = cast(Dict, results_or_iterator)
 
         # log before any exception is raised
         lgr.debug("Finished %r with status %s", cmd, results['code'])
@@ -206,4 +214,9 @@ class WitlessRunner(object):
             )
         # denoise, must be zero at this point
         results.pop('code', None)
+        run_time = time.time() - start_time
+        results['run_time'] = run_time
+        WitlessRunner.accumulated_runtime += run_time
+        print(cmd)
+        print(results['run_time'], WitlessRunner.accumulated_runtime)
         return results
