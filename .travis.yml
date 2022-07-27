@@ -47,13 +47,6 @@ matrix:
       - PYTEST_SELECTION_OP=not
       - DATALAD_REPO_VERSION=10
       - _DL_ANNEX_INSTALL_SCENARIO="miniconda --python-match minor --batch git-annex -m conda"
-  - python: '3.10'
-    dist: focal
-    env:
-      - PYTEST_SELECTION=
-      - PYTEST_SELECTION_OP=
-      - DATALAD_REPO_VERSION=10
-      - _DL_ANNEX_INSTALL_SCENARIO="miniconda --python-match minor --batch git-annex -m conda"
 
   allow_failures:
   # Test under NFS mount  (full, only in master)
@@ -121,6 +114,8 @@ install:
 script:
   # Now it should be safe to point TMPDIR to a "tricky" setup just for the purpose of testing
   - if [ -n "${_DL_TMPDIR:-}" ]; then export TMPDIR="${_DL_TMPDIR}"; fi
+  - pip list|grep datalad
+  - sudo pip list|grep datalad
   # Test installation for user
   - sudo pip install --user .
   # Report WTF information using system wide installed version
