@@ -21,7 +21,6 @@ from functools import partial
 from glob import glob
 from os import mkdir
 from os.path import (
-    basename,
     curdir,
     exists,
 )
