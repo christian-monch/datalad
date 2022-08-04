@@ -124,20 +124,20 @@ class AssemblingDecoderMixIn:
     Any un-decoded data is stored in the 'remaining_data'-attribute.
     """
     def __init__(self):
-        self.remaining_data = defaultdict(bytes)
+        self.remaining_data = defaultdict(bytearray)
 
     def decode(self,
                fd: int,
                data: bytes,
                encoding: str
                ) -> str:
-        assembled_data = self.remaining_data[fd] + data
+        self.remaining_data[fd].extend(data)
         try:
-            unicode_str = assembled_data.decode(encoding)
-            self.remaining_data[fd] = b''
+            unicode_str = self.remaining_data[fd].decode(encoding)
+            self.remaining_data[fd] = bytearray()
         except UnicodeDecodeError as e:
-            unicode_str = assembled_data[:e.start].decode(encoding)
-            self.remaining_data[fd] = assembled_data[e.start:]
+            unicode_str = self.remaining_data[fd][:e.start].decode(encoding)
+            self.remaining_data[fd] = self.remaining_data[fd][e.start:]
         return unicode_str
 
     def __del__(self):
