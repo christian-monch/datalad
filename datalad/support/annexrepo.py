@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import warnings
+from collections import deque
 from itertools import chain
 from multiprocessing import cpu_count
 from os import linesep
@@ -3641,7 +3642,7 @@ class AnnexJsonProtocol(WitlessProtocol):
                           DeprecationWarning)
         super().__init__()
         # to collect parsed JSON command output
-        self.json_out = []
+        self.json_out = deque()
         self._global_pbar_id = 'annexprogress-{}'.format(id(self))
         self.total_nbytes = total_nbytes
         self._unprocessed = None
@@ -3824,7 +3825,7 @@ class AnnexJsonProtocol(WitlessProtocol):
         # now amend the results, make clear in the key-name that these records
         # came from stdout -- may not be important here or now, but it is easy
         # to imagine structured output on stderr at some point
-        results['stdout_json'] = self.json_out
+        results['stdout_json'] = list(self.json_out)
         return results
 
     def process_exited(self):
