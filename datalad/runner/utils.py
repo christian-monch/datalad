@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from typing import Optional
+
 
 __docformat__ = "numpy"
 
@@ -28,7 +28,7 @@ class LineSplitter:
     on python's built-in splitlines().
     """
     def __init__(self,
-                 separator: Optional[str] = None,
+                 separator: str | None = None,
                  keep_ends: bool = False
                  ):
         """
@@ -39,7 +39,7 @@ class LineSplitter:
 
         Parameters
         ----------
-        separator: Optional[str]
+        separator: str | None
             If not None, the provided separator will be used to split lines.
         keep_ends: bool
             If True, the separator will be contained in the returned lines.
@@ -109,7 +109,7 @@ class LineSplitter:
                 return [line + self.separator for line in detected_lines]
             return detected_lines
 
-    def finish_processing(self) -> Optional[str]:
+    def finish_processing(self) -> str | None:
         return self.remaining_data
 
 
