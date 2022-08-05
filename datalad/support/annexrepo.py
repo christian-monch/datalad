@@ -3866,7 +3866,7 @@ class GeneratorAnnexJsonNoStderrProtocol(GeneratorAnnexJsonProtocol):
 
     def pipe_data_received(self, fd, data):
         if fd == 2:
-            self.stderr_output += data
+            self.stderr_output.extend(data)
             # let the base class decide what to do with it
         super().pipe_data_received(fd, data)
 
