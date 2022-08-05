@@ -14,7 +14,10 @@ jobs:
             datalad-neuroimaging,
             datalad-container,
             datalad-metalad,
-            datalad-crawler,
+            # TODO: stalls in CI in the test
+            #       `datalad_crawler.nodes.tests.test_crawl_url.test_recurse_loop_http`
+            #       with annex version: 10.20220322-1~ndall+1
+            # datalad-crawler,
             datalad-deprecated,
         ]
     steps:
