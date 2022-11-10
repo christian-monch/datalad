@@ -15,15 +15,18 @@ from __future__ import annotations
 import enum
 import logging
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
 from collections.abc import Generator
+from itertools import count
 from queue import (
     Empty,
     Queue,
 )
 from subprocess import Popen
+from subprocess import TimeoutExpired
 from typing import (
     Any,
     IO,
@@ -63,16 +66,26 @@ def _get_fileno(active: bool,
     return None
 
 
+def process_exists(process: Popen):
+    try:
+        result = subprocess.run(["ps", str(process.pid)], stdout=open("/dev/null", "wb"))
+        return result.returncode == 0
+    except NameError:
+        return False
+
+
 class _ResultGenerator(Generator):
     """
     Generator returned by run_command if the protocol class
     is a subclass of `datalad.runner.protocol.GeneratorMixIn`
     """
     class GeneratorState(enum.Enum):
-        process_running = 0
-        process_exited = 1
-        connection_lost = 2
-        waiting_for_process = 3
+        initialized = 0
+        process_running = 1
+        process_exited = 2
+        connection_lost = 3
+        waiting_for_process = 4
+        generator_exhausted = 5
 
     def __init__(self,
                  runner: ThreadedRunner,
@@ -89,26 +102,62 @@ class _ResultGenerator(Generator):
     def _check_result(self):
         self.runner._check_result()
 
-    def send(self, _):
+    def _wait(self, process: Popen) -> int | None:
+        #print("calling process.communicate()", file=sys.stderr)
+        #x = process.communicate()
+        #print("communicate result:", x, file=sys.stderr)
+
+        c = count()
+        wait_result = None
+        while wait_result is None:
+            try:
+                if not process_exists(process):
+                    print(f"_wait 1: process with pid: {process.pid} does not exist anymore", file=sys.stderr)
+                    return 0
+                print(f"_wait 2.{next(c)}: process.pid:", process.pid, "process.returncode:", process.returncode, "process.args", process.args, file=sys.stderr)
+                wait_result = process.wait(timeout=.1)
+            except TimeoutExpired:
+                print("id(process):", id(process), "process.pid:", process.pid)
+                pass
+        return process.returncode
+
+    def send(self, message):
+        if self.state == self.GeneratorState.initialized:
+            if message is not None:
+                raise ValueError("Non-None message sent to new generator")
+            self.state = self.GeneratorState.process_running
+
         runner = self.runner
         if self.state == self.GeneratorState.process_running:
 
+            print("Generator 1, process", runner.process.pid, file=sys.stderr)
+
             # If we have elements in the result queue, return one
             while len(self.result_queue) == 0 and runner.should_continue():
+                print("Generator 1.1", file=sys.stderr)
                 runner.process_queue()
             if len(self.result_queue) > 0:
+                print("Generator 1.2", file=sys.stderr)
                 return self.result_queue.popleft()
 
-            # The process must have exited
+            # We will not get any more output from the process because
+            # it either exited, or all output handling threads are dead and
+            # the output queue is empty (the process might still be running).
             # Let the protocol prepare the result. This has to be done after
             # the loop was left to ensure that all data from stdout and stderr
             # is processed.
+            print("Generator 1.3, calling process.wait()", runner.process.pid, file=sys.stderr)
+            self.runner.return_code = self._wait(self.runner.process)
+            print("Generator 1.4", file=sys.stderr)
             runner.protocol.process_exited()
-            self.return_code = runner.process.poll()
+            self.return_code = self.runner.return_code
             self._check_result()
             self.state = self.GeneratorState.process_exited
 
         if self.state == self.GeneratorState.process_exited:
+
+            print("Generator 2", file=sys.stderr)
+
             # The protocol might have added result in the
             # _prepare_result()- or in the process_exited()-
             # callback. Those are returned here.
@@ -121,12 +170,24 @@ class _ResultGenerator(Generator):
             self.state = self.GeneratorState.connection_lost
 
         if self.state == self.GeneratorState.connection_lost:
+
+            print("Generator 3", file=sys.stderr)
+
             # Get all results that were enqueued in
             # state: GeneratorState.process_exited.
             if len(self.result_queue) > 0:
                 return self.result_queue.popleft()
             self.runner.generator = None
+            self.state = self.GeneratorState.generator_exhausted
             raise StopIteration(self.return_code)
+
+        if self.state == self.GeneratorState.generator_exhausted:
+
+            print("Generator 4", file=sys.stderr)
+
+            raise StopIteration(self.return_code)
+
+        raise RuntimeError(f"Unknown generator state: {self.state}")
 
     def throw(self, exception_type, value=None, trace_back=None):
         return Generator.throw(self, exception_type, value, trace_back)
@@ -257,7 +318,6 @@ class ThreadedRunner:
         self.result: dict
         self.return_code: int
 
-
     def _check_result(self):
         if self.exception_on_error is True:
             if self.return_code != 0:
@@ -378,6 +438,8 @@ class ThreadedRunner:
                     "information."
                 )
             raise
+
+        print("id(self.process):", id(self.process), "self.process.pid:", self.process.pid)
 
         self.process_running = True
         self.active_file_numbers.add(None)
@@ -534,9 +596,11 @@ class ThreadedRunner:
     def should_continue(self) -> bool:
         # Continue with queue processing if there is still a process or
         # monitored files, or if there are still elements in the output queue.
+        print("should_continue:", self.active_file_numbers, self.output_queue.empty(), file=sys.stderr)
+        print("should_continue: is_stalled:", self.is_stalled(), file=sys.stderr)
         return (
             len(self.active_file_numbers) > 0
-            or not self.output_queue.empty())
+            or not self.output_queue.empty()) and not self.is_stalled()
 
     def is_stalled(self) -> bool:
         # If all queue-filling threads have exited and the queue is empty, we
@@ -548,14 +612,23 @@ class ThreadedRunner:
                 self.stderr_enqueueing_thread,
                 self.process_waiting_thread,
             ) if thread is not None]
+        print("live_threads:", live_threads, "process.poll:", self.process.poll(), "cmd:", self.cmd, file=sys.stderr)
+        #if not any(live_threads) and self.output_queue.empty():
+        #    pdb.set_trace()
         return not any(live_threads) and self.output_queue.empty()
 
     def check_for_stall(self) -> bool:
         if self.stall_check_interval == 0:
             self.stall_check_interval = 11
             if self.is_stalled():
-                lgr.warning(
-                    "ThreadedRunner.process_queue(): stall detected")
+                # Do not crash due to use of lgr while python is shutting down.
+                if sys.meta_path is None:
+                    print(
+                        "ThreadedRunner.process_queue(): stall detected",
+                        file=sys.stderr)
+                else:
+                    lgr.warning(
+                        "ThreadedRunner.process_queue(): stall detected")
                 return True
         self.stall_check_interval -= 1
         return False
@@ -651,6 +724,7 @@ class ThreadedRunner:
     def close_stdin(self):
         if self.stdin_queue:
             self.stdin_queue.put(None)
+        #_try_close(self.process.stdin)
 
     def _ensure_closed(self, file_objects):
         for file_object in file_objects:

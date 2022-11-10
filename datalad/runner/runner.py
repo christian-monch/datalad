@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import logging
+import sys
+from copy import copy
 from typing import cast
 
 from .coreprotocols import NoCapture
@@ -18,11 +20,45 @@ from .exception import CommandError
 from .nonasyncrunner import (
     ThreadedRunner,
     _ResultGenerator,
+    process_exists,
 )
-from .protocol import GeneratorMixIn
+from .protocol import GeneratorMixIn, WitlessProtocol
 
 
 lgr = logging.getLogger('datalad.runner.runner')
+
+
+class _InterceptorProtocol:
+    def connection_lost(self, exc):
+        """Called when the connection is lost or closed.
+
+        The argument is an exception object or None (the latter
+        meaning a regular EOF is received or the connection was
+        aborted or closed).
+        """
+        print("XXXXXXX: connection_lost", file=sys.stderr)
+        return super().connection_lost(self, exc)
+
+    def connection_made(self, process):
+        print("XXXXXXX: connection_made", file=sys.stderr)
+        return super().connection_made(self, process)
+
+    def pipe_connection_lost(self, fd, exc):
+        """Called when a file descriptor associated with the child process is
+        closed.
+
+        fd is the int file descriptor that was closed.
+        """
+        print("XXXXXXX: pipe_connection_lost", file=sys.stderr)
+        return super().pipe_connection_lost(fd, exc)
+
+    def pipe_data_received(self, fd, data):
+        print("XXXXXXX: pipe_data_received", file=sys.stderr)
+        return super().pipe_data_received(fd, data)
+
+    def process_exited(self):
+        print("XXXXXXX: process_exited", file=sys.stderr)
+        return super().process_exited()
 
 
 class WitlessRunner(object):
@@ -31,7 +67,7 @@ class WitlessRunner(object):
     It aims to be as simple as possible, providing only essential
     functionality.
     """
-    __slots__ = ['cwd', 'env', 'threaded_runner']
+    __slots__ = ['cwd', 'env', 'threaded_runner', 'protocol', 'iterator']
 
     def __init__(self, cwd=None, env=None):
         """
@@ -51,6 +87,7 @@ class WitlessRunner(object):
         self.cwd = cwd
 
         self.threaded_runner = None
+        self.iterator = None
 
     def _get_adjusted_env(self, env=None, cwd=None, copy=True):
         """Return an adjusted copy of an execution environment
@@ -167,6 +204,16 @@ class WitlessRunner(object):
             # by default let all subprocess stream pass through
             protocol = NoCapture
 
+        # Adapt the interceptor protocol to handle the same content as
+        # the provided protocol
+        if issubclass(protocol, GeneratorMixIn):
+            class Interceptor(protocol, _InterceptorProtocol):
+                pass
+
+            Interceptor.proc_err = protocol.proc_err
+            Interceptor.proc_out = protocol.proc_out
+            protocol = Interceptor
+
         cwd = cwd or self.cwd
         env = self._get_adjusted_env(
             env or self.env,
@@ -194,8 +241,10 @@ class WitlessRunner(object):
         results_or_iterator = self.threaded_runner.run()
 
         if issubclass(protocol, GeneratorMixIn):
+            self.iterator = results_or_iterator
             return results_or_iterator
         else:
+            self.iterator = None
             results = cast(dict, results_or_iterator)
 
         # log before any exception is raised
@@ -214,6 +263,24 @@ class WitlessRunner(object):
                 cwd=self.cwd,
                 **results,
             )
-        # denoise, must be zero at this point
+        self.threaded_runner = None
+        # denoise the result, code must be zero at this point
         results.pop('code', None)
         return results
+
+    def running(self):
+        if self.threaded_runner is None:
+            return False
+        if self.iterator is not None:
+            # Check whether the process is still running, it might have
+            # exited.
+            result = self.iterator.runner.process.poll()
+            if result is None:
+                if not process_exists(self.iterator.runner.process):
+                    self.iterator = None
+                    self.threaded_runner = None
+                    return False
+                return True
+            self.threaded_runner = None
+            return False
+        return True

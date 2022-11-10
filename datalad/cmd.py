@@ -19,6 +19,7 @@ import os
 import queue
 import sys
 import warnings
+from itertools import count
 from queue import Queue
 from subprocess import TimeoutExpired
 from typing import (
@@ -33,6 +34,7 @@ from datetime import datetime
 from operator import attrgetter
 from weakref import WeakValueDictionary, ReferenceType, ref
 
+from datalad import cfg
 # start of legacy import block
 # to avoid breakage of code written before datalad.runner
 from datalad.runner.coreprotocols import (
@@ -47,7 +49,7 @@ from datalad.runner.gitrunner import (
     GitRunnerBase,
     GitWitlessRunner,
 )
-from datalad.runner.nonasyncrunner import run_command
+from datalad.runner.nonasyncrunner import run_command, process_exists
 from datalad.runner.protocol import WitlessProtocol
 from datalad.runner.runner import WitlessRunner
 from datalad.support.exceptions import CommandError
@@ -69,6 +71,11 @@ from datalad.utils import (
 
 
 __docformat__ = "restructuredtext"
+
+
+# Cache those here to make them available in shutdown code
+_cfg_var = "datalad.runtime.stalled-external"
+_cfg_val = cfg.obtain(_cfg_var)
 
 
 class BatchedCommandError(CommandError):
@@ -150,6 +157,7 @@ class BatchedCommandProtocol(GeneratorMixIn, StdOutErrCapture):
         self.line_splitter = LineSplitter()
 
     def pipe_data_received(self, fd: int, data: bytes):
+        print("pipe_data_received", fd, repr(data), file=sys.stderr)
         if fd == STDERR_FILENO:
             self.send_result((fd, data))
         elif fd == STDOUT_FILENO:
@@ -194,17 +202,22 @@ class ReadlineEmulator:
 
 
 class SafeDelCloseMixin(object):
-    """A helper class to use where __del__ would call .close() which might
+    """
+    A helper class to use where __del__ would call .close() which might
     fail if "too late in GC game"
     """
     def __del__(self):
+        print(f"sys.meta_path: {sys.meta_path}", file=sys.stderr)
         try:
             self.close()
+            print("closed", file=sys.stderr)
         except TypeError:
             if os.fdopen is None or lgr.debug is None:
                 # if we are late in the game and things already gc'ed in py3,
                 # it is Ok
+                print("late", file=sys.stderr)
                 return
+            print("other error", file=sys.stderr)
             raise
 
 
@@ -254,6 +267,7 @@ class BatchedCommand(SafeDelCloseMixin):
 
     @classmethod
     def clean_inactive(cls):
+        return
         from . import cfg
         max_batched = cfg.obtain("datalad.runtime.max-batched")
         max_inactive_age = cfg.obtain("datalad.runtime.max-inactive-age")
@@ -324,6 +338,10 @@ class BatchedCommand(SafeDelCloseMixin):
 
     def process_running(self) -> bool:
         if self.runner:
+            if not process_exists(self.generator.runner.process):
+                print("UNEXPECTED EXIT? of", self.generator.runner.process.pid, file=sys.stderr)
+                return False
+
             result = self.generator.runner.process.poll()
             if result is None:
                 return True
@@ -504,22 +522,41 @@ class BatchedCommand(SafeDelCloseMixin):
         str, optional
           stderr output if return_stderr is True, None otherwise
         """
+        print("close called: self.runner", self.runner, file=sys.stderr)
+        process = self.generator.runner.process
+        print("close -1: process exists: ", process_exists(process), file=sys.stderr)
+        if not process_exists(process):
+            result = self.get_requested_error_output(return_stderr)
+            print("result of self.get_requested_error_output:", result, file=sys.stderr)
+            self.runner = None
+            self.stderr_output = b""
+            return result
 
         if self.runner:
 
+            print("close 0: process exists: ", process_exists(process), file=sys.stderr)
+
+            print("close 1", file=sys.stderr)
             abandon = self._get_abandon()
+            print("close 2", file=sys.stderr)
+            print("close 2.1: process exists: ", process_exists(process), file=sys.stderr)
 
             # Close stdin to let the process know that we want to end
             # communication. We also close stdout and stderr to inform
             # the generator that we do not care about them anymore. This
             # will trigger process wait timeouts.
             self.generator.runner.close_stdin()
+            print("close 3", file=sys.stderr)
+            print("close 3.1: process exists: ", process_exists(process), file=sys.stderr)
 
             # Process all remaining messages until the subprocess exits.
             remaining = []
             timeout = False
             try:
+                c = count()
+                print("close 4", self.generator, file=sys.stderr)
                 for source, data in self.generator:
+                    print(f"close 5.{next(c)}: source, data", source, data, file=sys.stderr)
                     if source == STDERR_FILENO:
                         self.stderr_output += data
                     elif source == STDOUT_FILENO:
@@ -549,7 +586,9 @@ class BatchedCommand(SafeDelCloseMixin):
                     self.generator.runner.process.pid,
                 )
 
+        print("calling self.get_requested_error_output", file=sys.stderr)
         result = self.get_requested_error_output(return_stderr)
+        print("result of self.get_requested_error_output:", result, file=sys.stderr)
         self.runner = None
         self.stderr_output = b""
         return result
@@ -594,12 +633,9 @@ class BatchedCommand(SafeDelCloseMixin):
 
     def _get_abandon(self):
         if self._abandon_cache is None:
-            from . import cfg
-            cfg_var = "datalad.runtime.stalled-external"
-            cfg_val = cfg.obtain(cfg_var)
-            if cfg_val not in ("wait", "abandon"):
-                raise ValueError(f"Unexpected value: {cfg_var}={cfg_val!r}")
-            self._abandon_cache = cfg_val == "abandon"
+            if _cfg_val not in ("wait", "abandon"):
+                raise ValueError(f"Unexpected value: {_cfg_var}={_cfg_val!r}")
+            self._abandon_cache = _cfg_val == "abandon"
         return self._abandon_cache
 
 

@@ -9,6 +9,7 @@
 """Test WitlessRunner
 """
 import sys
+import time
 import unittest.mock
 from subprocess import TimeoutExpired
 
@@ -198,3 +199,31 @@ print(a*b)
     assert bc.return_code == 1
     assert bc.last_request is None
     bc.close(return_stderr=False)
+
+
+def test_stall_warning():
+    bc = BatchedCommand(
+        cmd=py2cmd(
+            """
+import sys
+import time
+from itertools import count
+
+c = count()
+while True:
+    x = sys.stdin.readline()
+    if x.strip() == "":
+        break
+    time.sleep(1)
+    print(f'{{"count": {next(c)}, "input": "{repr(x)}"}}')
+print("")
+            """)
+    )
+
+    for i in range(3):
+        result = bc(f"test {i}")
+        print('INTERMEDIATE:', repr(result), file=sys.stderr)
+    result = bc("")
+    print('LAST:', repr(result), file=sys.stderr)
+    del bc
+    time.sleep(10)
