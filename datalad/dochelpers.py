@@ -15,11 +15,8 @@ the same developers as DataLad
 import logging
 import re
 import textwrap
-import os
-import sys
-import traceback
 
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 lgr = logging.getLogger("datalad.docutils")
 

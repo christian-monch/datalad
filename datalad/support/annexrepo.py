@@ -37,13 +37,10 @@ from weakref import (
 )
 
 import datalad.utils as ut
-from datalad.cmd import (  # KillOutput,
+from datalad.cmd import (
     BatchedCommand,
-    GitWitlessRunner,
     SafeDelCloseMixin,
-    StdOutCapture,
     StdOutErrCapture,
-    WitlessProtocol,
 )
 from datalad.consts import WEB_SPECIAL_REMOTE_UUID
 # imports from same module:
@@ -53,7 +50,11 @@ from datalad.dochelpers import (
     borrowkwargs,
 )
 from datalad.log import log_progress
-from datalad.runner.protocol import GeneratorMixIn
+from datalad.runner.gitrunner import GitWitlessRunner
+from datalad.runner.protocol import (
+    GeneratorMixIn,
+    WitlessProtocol,
+)
 from datalad.runner.utils import (
     AssemblingDecoderMixIn,
     LineSplitter,
@@ -63,7 +64,7 @@ from datalad.support.annex_utils import (
     _get_non_existing_from_annex_output,
     _sanitize_key,
 )
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 # must not be loads, because this one would log, and we need to log ourselves
 from datalad.support.json_py import json_loads
 from datalad.ui import ui

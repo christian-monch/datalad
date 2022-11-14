@@ -20,10 +20,8 @@ from datalad.log import lgr
 # import version helper from config to have only one implementation
 # config needs this to avoid circular imports
 from datalad.config import get_git_version as __get_git_version
-from .exceptions import (
-    CapturedException,
-    CommandError,
-)
+from .capturedexception import CapturedException
+from .exceptions import CommandError
 
 __all__ = ['UnknownVersion', 'ExternalVersions', 'external_versions']
 
@@ -47,9 +45,9 @@ class UnknownVersion:
 #
 from datalad.cmd import (
     WitlessRunner,
-    GitWitlessRunner,
     StdOutErrCapture,
 )
+from datalad.runner.gitrunner import GitWitlessRunner
 from datalad.support.exceptions import (
     MissingExternalDependency,
     OutdatedExternalDependency,

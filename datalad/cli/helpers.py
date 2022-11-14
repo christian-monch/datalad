@@ -21,7 +21,7 @@ from textwrap import wrap
 
 from datalad import __version__
 # delay?
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 from datalad.ui.utils import get_console_width
 from datalad.utils import is_interactive
 

@@ -28,7 +28,7 @@ from datalad.distribution.dataset import Dataset
 from datalad.support.annexrepo import AnnexRepo
 from datalad.support.archives import ArchivesCache
 from datalad.support.cache import DictCache
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 from datalad.support.locking import lock_if_check_fails
 from datalad.support.network import URL
 from datalad.utils import (

@@ -17,7 +17,7 @@ from .base import Interface
 from datalad.interface.base import build_doc
 from datalad.interface.utils import eval_results
 from datalad.interface.results import get_status_dict
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 from logging import getLogger
 

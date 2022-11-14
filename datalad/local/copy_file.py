@@ -30,7 +30,7 @@ from datalad.distribution.dataset import (
     require_dataset,
 )
 from datalad.support.annexrepo import AnnexRepo
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 from datalad.utils import (
     ensure_list,
     get_dataset_root,

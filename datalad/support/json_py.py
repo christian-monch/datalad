@@ -28,7 +28,7 @@ from simplejson import dump as jsondump
 from simplejson import loads as json_loads
 from simplejson import JSONDecodeError
 
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 
 # produce relatively compact, but also diff-friendly format

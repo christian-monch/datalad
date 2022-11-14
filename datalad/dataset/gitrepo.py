@@ -32,16 +32,14 @@ from weakref import (
     WeakValueDictionary
 )
 
-from datalad.cmd import (
-    GitWitlessRunner,
-    StdOutErrCapture,
-)
 from datalad.config import ConfigManager
 from datalad.dataset.repo import (
     PathBasedFlyweight,
     RepoInterface,
     path_based_str_repr,
 )
+from datalad.runner.coreprotocols import StdOutErrCapture
+from datalad.runner.gitrunner import GitWitlessRunner
 from datalad.runner.nonasyncrunner import (
     STDERR_FILENO,
     STDOUT_FILENO,

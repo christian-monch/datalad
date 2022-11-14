@@ -25,7 +25,7 @@ from threading import Thread
 from . import ansi_colors as colors
 from ..log import log_progress
 from ..utils import path_is_subpath
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 import logging
 lgr = logging.getLogger('datalad.parallel')

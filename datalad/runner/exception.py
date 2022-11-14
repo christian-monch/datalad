@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 
+from datalad.utils import ensure_unicode
+
 
 lgr = logging.getLogger('datalad.runner.exception')
 

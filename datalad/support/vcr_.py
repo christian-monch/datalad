@@ -16,7 +16,7 @@ from os.path import isabs
 from contextlib import contextmanager
 
 from datalad.utils import Path
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 lgr = logging.getLogger("datalad.support.vcr")
 

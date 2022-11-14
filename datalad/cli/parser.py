@@ -371,7 +371,7 @@ def single_subparser_possible(cmdlineargs, parser, completing):
                   __version__, parsed_args, unparsed_args)
     except Exception as exc:
         # this did not work out
-        from datalad.support.exceptions import CapturedException
+        from datalad.support.capturedexception import CapturedException
         ce = CapturedException(exc)
         lgr.debug("Early parsing failed with %s", ce)
         return 'error', None

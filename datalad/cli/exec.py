@@ -21,15 +21,6 @@ from datalad.utils import (
     getargspec,
 )
 
-# only imported during command execution
-# .interface._has_eval_results_call
-# from .utils import EnsureKeyChoice
-
-# special-case imports
-# .renderer.DefaultOutputRenderer
-# from datalad.ui import ui
-# from .exceptions import CapturedException
-
 
 def call_from_parser(cls, args):
     """Executable to be registered with the parser for a particular command

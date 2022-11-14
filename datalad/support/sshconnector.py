@@ -32,24 +32,22 @@ from datalad.utils import quote_cmdlinearg as sh_quote
 # on initial import datalad time
 # from datalad.support.network import RI, is_ssh
 
+from datalad.cmd import (
+    StdOutErrCapture,
+    WitlessRunner,
+)
+from datalad.runner.coreprotocols import NoCapture
+from datalad.support.capturedexception import CapturedException
 from datalad.support.exceptions import (
-    CapturedException,
     CommandError,
     ConnectionOpenFailedError,
 )
-from datalad.support.external_versions import (
-    external_versions,
-)
+from datalad.support.external_versions import external_versions
 from datalad.utils import (
     auto_repr,
     Path,
     ensure_list,
     on_windows,
-)
-from datalad.cmd import (
-    NoCapture,
-    StdOutErrCapture,
-    WitlessRunner,
 )
 
 lgr = logging.getLogger('datalad.support.sshconnector')

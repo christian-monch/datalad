@@ -31,29 +31,11 @@ from typing import (
 )
 from datetime import datetime
 from operator import attrgetter
-from weakref import WeakValueDictionary, ReferenceType, ref
+from weakref import WeakValueDictionary
 
-# start of legacy import block
-# to avoid breakage of code written before datalad.runner
-from datalad.runner.coreprotocols import (
-    KillOutput,
-    NoCapture,
-    StdErrCapture,
-    StdOutCapture,
-    StdOutErrCapture,
-)
-from datalad.runner.gitrunner import (
-    GIT_SSH_COMMAND,
-    GitRunnerBase,
-    GitWitlessRunner,
-)
-from datalad.runner.nonasyncrunner import run_command
-from datalad.runner.protocol import WitlessProtocol
-from datalad.runner.runner import WitlessRunner
-from datalad.support.exceptions import CommandError
-# end of legacy import block
-
+from datalad import cfg
 from datalad.runner.coreprotocols import StdOutErrCapture
+from datalad.runner.gitrunner import GitRunnerBase
 from datalad.runner.nonasyncrunner import (
     STDERR_FILENO,
     STDOUT_FILENO,
@@ -62,6 +44,7 @@ from datalad.runner.nonasyncrunner import (
 from datalad.runner.protocol import GeneratorMixIn
 from datalad.runner.runner import WitlessRunner
 from datalad.runner.utils import LineSplitter
+from datalad.support.exceptions import CommandError
 from datalad.utils import (
     auto_repr,
     ensure_unicode,
@@ -69,6 +52,10 @@ from datalad.utils import (
 
 
 __docformat__ = "restructuredtext"
+
+
+_cfg_var = "datalad.runtime.stalled-external"
+_cfg_val = cfg.obtain(_cfg_var)
 
 
 class BatchedCommandError(CommandError):
@@ -594,12 +581,9 @@ class BatchedCommand(SafeDelCloseMixin):
 
     def _get_abandon(self):
         if self._abandon_cache is None:
-            from . import cfg
-            cfg_var = "datalad.runtime.stalled-external"
-            cfg_val = cfg.obtain(cfg_var)
-            if cfg_val not in ("wait", "abandon"):
-                raise ValueError(f"Unexpected value: {cfg_var}={cfg_val!r}")
-            self._abandon_cache = cfg_val == "abandon"
+            if _cfg_val not in ("wait", "abandon"):
+                raise ValueError(f"Unexpected value: {_cfg_var}={_cfg_val!r}")
+            self._abandon_cache = _cfg_val == "abandon"
         return self._abandon_cache
 
 

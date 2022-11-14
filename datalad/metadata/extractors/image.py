@@ -15,7 +15,7 @@ from datalad.log import log_progress
 
 from PIL import Image
 from datalad.metadata.extractors.base import BaseMetadataExtractor
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 vocabulary = {
     "spatial_resolution(dpi)": {

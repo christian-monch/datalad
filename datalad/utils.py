@@ -34,7 +34,6 @@ from functools import (
     wraps,
 )
 from itertools import tee
-# this import is required because other modules import opj from here.
 from os.path import (
     abspath,
     basename,
@@ -48,7 +47,6 @@ from os.path import (
     isdir,
     islink,
 )
-from os.path import join as opj
 from os.path import (
     lexists,
     normpath,
@@ -63,9 +61,8 @@ from shlex import split as shlex_split
 from tempfile import NamedTemporaryFile
 from time import sleep
 
-# from datalad.dochelpers import get_docstring_split
 from datalad.consts import TIMESTAMP_FMT
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 unicode_srctypes = str, bytes
 
@@ -2304,7 +2301,7 @@ def import_modules(modnames, pkg, msg="Failed to import {module}", log=lgr.debug
                 pkg)
             mods_loaded.append(mod)
         except Exception as exc:
-            from datalad.support.exceptions import CapturedException
+            from datalad.support.capturedexception import CapturedException
             ce = CapturedException(exc)
             log((msg + ': {exception}').format(
                 module=modname, package=pkg, exception=ce.message))

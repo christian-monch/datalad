@@ -33,7 +33,7 @@ from datalad.distribution.dataset import (
     resolve_path,
 )
 from datalad.interface.common_opts import eval_params
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 default_logchannels = {
     '': 'debug',

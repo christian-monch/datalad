@@ -15,7 +15,7 @@ __docformat__ = 'restructuredtext'
 import logging
 import json
 
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 lgr = logging.getLogger('datalad.core.local.resulthooks')
 

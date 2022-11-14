@@ -44,7 +44,7 @@ from datalad.support.constraints import (
     EnsureNone,
     EnsureStr,
 )
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 from datalad.support.json_py import load_stream
 from datalad.support.param import Parameter
 

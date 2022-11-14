@@ -11,7 +11,7 @@
 import logging
 import sys
 
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 lgr = logging.getLogger('datalad.support.entrypoints')
 

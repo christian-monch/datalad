@@ -7,7 +7,7 @@ Support functionality for using DueCredit
 # Note Text was added/exposed only since DueCredit 0.6.5
 from .due import due, Doi, Text
 from ..utils import never_fail, swallow_logs
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 import logging
 lgr = logging.getLogger('datalad.duecredit')

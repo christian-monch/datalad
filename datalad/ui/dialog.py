@@ -31,7 +31,7 @@ from copy import copy
 from ..utils import auto_repr
 from ..utils import on_windows
 from .base import InteractiveUI
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 # Example APIs which might be useful to look for "inspiration"
 #  man debconf-devel

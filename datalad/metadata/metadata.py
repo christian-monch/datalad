@@ -64,7 +64,7 @@ from datalad.support.constraints import (
     EnsureNone,
     EnsureStr,
 )
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 from datalad.support.gitrepo import GitRepo
 from datalad.support.json_py import load as jsonload
 from datalad.support.json_py import load_xzstream

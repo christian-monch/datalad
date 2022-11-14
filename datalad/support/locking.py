@@ -10,7 +10,7 @@ from ..utils import (
     get_open_files,
     unlink,
 )
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 
 import logging

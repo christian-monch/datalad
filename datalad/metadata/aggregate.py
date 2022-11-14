@@ -67,7 +67,7 @@ from datalad.support.constraints import (
 from datalad.support.constraints import EnsureChoice
 from datalad.support.gitrepo import GitRepo
 from datalad.support.annexrepo import AnnexRepo
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 from datalad.support import json_py
 from datalad.support.path import split_ext
 from datalad.utils import (

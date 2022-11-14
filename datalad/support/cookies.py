@@ -15,7 +15,7 @@ import platformdirs
 import os.path
 
 from .network import get_tld
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 lgr = logging.getLogger('datalad.cookies')
 

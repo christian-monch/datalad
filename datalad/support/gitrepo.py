@@ -37,13 +37,12 @@ from os.path import (
 
 import datalad.utils as ut
 from datalad import ssh_manager
-from datalad.cmd import (
-    BatchedCommand,
-    GitWitlessRunner,
+from datalad.runner.coreprotocols import (
     NoCapture,
     StdOutErrCapture,
-    WitlessProtocol,
 )
+from datalad.runner.gitrunner import GitWitlessRunner
+from datalad.runner.protocol import WitlessProtocol
 from datalad.config import (
     parse_gitconfig_dump,
     write_config_section,
@@ -75,11 +74,10 @@ from datalad.utils import (
     on_windows,
     optional_args,
     path_is_subpath,
-    posix_relpath,
 )
 
+from .capturedexception import CapturedException
 from .exceptions import (
-    CapturedException,
     CommandError,
     FileNotInRepositoryError,
     InvalidGitReferenceError,

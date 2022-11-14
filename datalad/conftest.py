@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 from datalad.utils import (
     get_encoding_info,
     get_envvars_info,

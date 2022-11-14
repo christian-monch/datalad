@@ -52,12 +52,12 @@ import pytest
 import datalad.utils as ut
 from datalad import cfg as dl_cfg
 from datalad.cmd import (
-    GitWitlessRunner,
-    KillOutput,
     StdOutErrCapture,
     WitlessRunner,
 )
 from datalad.core.local.repo import repo_from_path
+from datalad.runner.coreprotocols import KillOutput
+from datalad.runner.gitrunner import GitWitlessRunner
 from datalad.utils import (
     Path,
     ensure_unicode,

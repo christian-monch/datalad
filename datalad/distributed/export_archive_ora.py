@@ -36,7 +36,7 @@ from datalad.support.constraints import (
     EnsureNone,
     EnsureStr,
 )
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 from datalad.distribution.dataset import (
     EnsureDataset,
     datasetmethod,

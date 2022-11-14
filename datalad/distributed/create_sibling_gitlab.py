@@ -15,7 +15,7 @@ __docformat__ = 'restructuredtext'
 import logging
 import warnings
 
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 
 from ..distribution.dataset import (
     EnsureDataset,

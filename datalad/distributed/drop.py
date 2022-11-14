@@ -45,7 +45,7 @@ from datalad.support.constraints import (
     EnsureNone,
     EnsureStr,
 )
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 from datalad.support.param import Parameter
 from datalad.utils import (
     ensure_list,

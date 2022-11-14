@@ -47,7 +47,7 @@ from datalad import (
     consts,
 )
 from datalad.support.cache import lru_cache
-from datalad.support.exceptions import CapturedException
+from datalad.support.capturedexception import CapturedException
 from datalad.utils import (
     Path,
     PurePath,
