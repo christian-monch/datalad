@@ -22,6 +22,7 @@ from time import (
 import pytest
 
 from datalad.tests.utils_pytest import (
+    OBSCURE_DIRNAME,
     OBSCURE_FILENAME,
     SkipTest,
     assert_cwd_unchanged,
@@ -130,22 +131,22 @@ def test_runner_stdin(path=None):
     runner = Runner()
     fakestdin = Path(path) / 'io'
     # go for difficult content
-    fakestdin.write_text(OBSCURE_FILENAME)
+    fakestdin.write_text(OBSCURE_DIRNAME)
 
     res = runner.run(
         py2cmd('import fileinput; print(fileinput.input().readline())'),
         stdin=fakestdin.open(),
         protocol=StdOutCapture,
     )
-    assert_in(OBSCURE_FILENAME, res['stdout'])
+    assert_in(OBSCURE_DIRNAME, res['stdout'])
 
     # we can do the same without a tempfile, too
     res = runner.run(
         py2cmd('import fileinput; print(fileinput.input().readline())'),
-        stdin=OBSCURE_FILENAME.encode('utf-8'),
+        stdin=OBSCURE_DIRNAME.encode('utf-8'),
         protocol=StdOutCapture,
     )
-    assert_in(OBSCURE_FILENAME, res['stdout'])
+    assert_in(OBSCURE_DIRNAME, res['stdout'])
 
 
 @pytest.mark.fail_slow(3)
