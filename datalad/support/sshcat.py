@@ -19,9 +19,6 @@ class _SshCatProtocol(StdOutCapture, GeneratorMixIn):
     def pipe_data_received(self, fd: int, data: bytes):
         assert fd == 1
         self.send_result(data)
-        fd_name, buffer = self.fd_infos[fd]
-        if buffer is not None:
-            buffer.extend(data)
 
 
 class SshCat:
