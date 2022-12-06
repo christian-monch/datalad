@@ -195,16 +195,28 @@ class ThreadedRunner:
             `datalad.runner.protocol.GeneratorMixIn`, the function will return
             the result created by the protocol method `_generate_result`.
 
-        stdin : file-like, bytes, Queue, or None
-            If stdin is a file-like, it will be directly used as stdin for the
-            subprocess. The caller is responsible for writing to it and closing
-            it. If stdin is a bytes, it will be fed to stdin of the subprocess.
-            If all data is written, stdin will be closed.
+        stdin : file-like, int, None, bytes or Queue
+            The supported values are the values that are can be used for the
+            stdin-keyword argument in `subprocess.Popen()`. In addition a Queue
+            and bytes are supported.
+
+            If stdin is not a Queue or bytes, it will be directly used as value
+            of the stdin-keyword for `subprocess.Popen()`. The caller is
+            responsible for writing to any file descriptors and closing it.
+
+            If stdin is bytes, it will be fed to stdin of the subprocess. If all
+            data is written, the writing end of stdin will be closed.
             If stdin is a Queue, all elements (bytes) put into the Queue will
             be passed to stdin until None is read from the queue. If None is
             read, stdin of the subprocess is closed.
-            If stdin is None, nothing will be sent to stdin of the subprocess.
-            More precisely, `subprocess.Popen` will be called with `stdin=None`.
+
+            Note: if stdin is None, the stdin of the parent process will be
+            inherited by the child process, i.e. the child process can read
+            everything that is written to the stdin of the parent process.
+            If stdin is subprocess.DEVNULL, nothing will be sent to stdin of
+            the subprocess, and the stdin of the subprocess will be connected
+            to a null device More precisely, `subprocess.Popen` will be called
+            with `stdin=subprocess.DEVNULL`.
 
         protocol_kwargs : dict, optional
             Passed to the protocol class constructor.

@@ -79,7 +79,7 @@ class WitlessRunner(object):
     def run(self,
             cmd: list | str,
             protocol: type[WitlessProtocol] | None = None,
-            stdin: bytes | IO | Queue | None = None,
+            stdin: int | IO | bytes | Queue | None = None,
             cwd: PathLike | str | None = None,
             env: dict | None = None,
             timeout: float | None = None,
@@ -99,13 +99,16 @@ class WitlessRunner(object):
           If the protocol has the GeneratorMixIn-mixin, the run-method
           will return an iterator and can therefore be used in a for-clause.
         stdin : file-like, bytes, Queue, or None
-          If stdin is a file-like, it will be directly used as stdin for the
-          subprocess. The caller is responsible for writing to it and closing it.
+          If stdin is a file-like, None, or int, it will be directly used as
+          value for the stdin-keyword of `subprocess.Popen()`. In case of a file
+          like or a file descriptor, the caller is responsible for writing to it
+          and closing its write end, when finished.
           If stdin is a bytes, it will be fed to stdin of the subprocess.
-          If all data is written, stdin will be closed.
+          If all data is written, the write-end of stdin will be closed.
           If stdin is a Queue, all elements (bytes) put into the Queue will
-          be passed to stdin until None is read from the queue. If None is read,
-          stdin of the subprocess is closed.
+          be passed to stdin of the subprocess, until None is read from the
+          queue. If None is read, the write-end of stdin of the subprocess is
+          closed.
         cwd : str or path-like, optional
           If given, commands are executed with this path as PWD,
           the PWD of the parent process is used otherwise. Overrides

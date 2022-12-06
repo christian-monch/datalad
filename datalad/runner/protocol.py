@@ -53,12 +53,14 @@ class WitlessProtocol:
     to capture and return output. In particular, the `pipe_data_received()`
     method can be overwritten to implement "online" processing of process
     output.
-
-    This class defines a default return value setup that causes
-    `run_async_cmd()` to return a 2-tuple with the subprocess's exit code
-    and a list with bytestrings of all captured output streams.
     """
 
+    # The following two class variables determine how output from the subprocess
+    # that is received over stdout or stderr is processed. If they are set to
+    # `False`, output of the subprocess will be written to the respective
+    # output of the parent process. If they are set to `True`, output to the
+    # respective file in the subprocess, i.e. stdout or stderr, will be
+    # captured and sent to the `pipe_data_received` method.
     proc_out = False
     proc_err = False
 
