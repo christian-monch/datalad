@@ -3951,7 +3951,8 @@ class BatchedAnnex(BatchedCommand):
     """
 
     def __init__(self, annex_cmd, git_options=None, annex_options=None, path=None,
-                 json=False, output_proc=None, batch_opt='--batch'):
+                 json=False, output_proc=None, batch_opt='--batch',
+                 use_null_delimiter=True):
         if not isinstance(annex_cmd, list):
             annex_cmd = [annex_cmd]
         cmd = \
@@ -3962,13 +3963,20 @@ class BatchedAnnex(BatchedCommand):
             (annex_options if annex_options else []) + \
             (['--json', '--json-error-messages'] if json else []) + \
             [batch_opt] + \
+            (['-z'] if use_null_delimiter else []) + \
             (['--debug'] if lgr.getEffectiveLevel() <= 8 else [])
         output_proc = \
             output_proc if output_proc else readline_json if json else None
         super(BatchedAnnex, self).__init__(
             cmd,
             path=path,
-            output_proc=output_proc)
+            output_proc=output_proc,
+            **(
+                dict(input_delimiter=b'\x00')
+                if use_null_delimiter
+                else dict()
+            ),
+        )
 
 
 # TODO: Why was this commented out?
