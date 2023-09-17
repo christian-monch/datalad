@@ -237,7 +237,7 @@ class BaseSSHConnection(object):
                     cmd)
         return cmd
 
-    def _exec_ssh(self, ssh_cmd, cmd, options=None, stdin=None, log_output=True):
+    def _exec_ssh(self, ssh_cmd, cmd, options=None, stdin=b'', log_output=True):
         cmd = self._adjust_cmd_for_bundle_execution(cmd)
 
         for opt in options or []:
@@ -414,7 +414,7 @@ class NoMultiplexSSHConnection(BaseSSHConnection):
     The connection is opened for execution of a single process, and closed
     as soon as the process end.
     """
-    def __call__(self, cmd, options=None, stdin=None, log_output=True):
+    def __call__(self, cmd, options=None, stdin=b'', log_output=True):
 
         # there is no dedicated "open" step, put all args together
         ssh_cmd = [self.ssh_executable] + self._ssh_open_args + self._ssh_args
@@ -476,7 +476,7 @@ class MultiplexSSHConnection(BaseSSHConnection):
             fasteners.process_lock.InterProcessLock(self.ctrl_path.with_suffix('.lck'))
         ]
 
-    def __call__(self, cmd, options=None, stdin=None, log_output=True):
+    def __call__(self, cmd, options=None, stdin=b'', log_output=True):
 
         # XXX: check for open socket once
         #      and provide roll back if fails to run and was not explicitly
